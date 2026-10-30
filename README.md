@@ -33,4 +33,6 @@ Para montarla en un proyecto nuevo: ejecuta los archivos de `supabase/` en orden
 
 ## Publicar
 
-Es un sitio estático. En Netlify se puede conectar este repositorio (sin comando de compilación y con la carpeta raíz como carpeta de publicación) o subir la carpeta comprimida en Netlify Drop.
+Está publicado con **GitHub Pages** desde la rama `main`: https://edwinalejandro0824-web.github.io/sistema-forrajera/ (cada cambio en `main` se publica solo).
+
+También funciona en cualquier hosting estático. En Netlify se puede conectar este repositorio (sin comando de compilación y con la carpeta raíz como carpeta de publicación) o subir la carpeta comprimida en Netlify Drop.
