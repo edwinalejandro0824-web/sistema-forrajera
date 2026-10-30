@@ -1,0 +1,498 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style>
+<title>Sistema Forrajera</title>
+<meta name="theme-color" content="#2F6B3A">
+<meta name="description" content="Inventario y ventas por bulto y a granel para tu forrajera.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Forrajera">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://opqnywgbtgujwprmhutc.supabase.co wss://opqnywgbtgujwprmhutc.supabase.co; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
+<meta name="referrer" content="no-referrer">
+<script src="vendor/supabase-2.45.4.min.js" integrity="sha384-GFr3yTh5lJznCbZfpTtXnwboFsxqtTQoeTZCRHhE0579KrRmlCzen5AA8ohaB5ug"></script>
+<script src="config.js"></script>
+<script src="db.js"></script>
+</head><body>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: una sola columna de trabajo. Arriba el resumen y las alertas, abajo la lista por tienda y los paneles de gestion. */
+:root {
+  --bg: #F4F6F8;
+  --surface: #FFFFFF;
+  --ink: #142033;
+  --muted: #5B6878;
+  --line: #DDE3EA;
+  --accent: #2B59C3;
+  --accent-ink: #FFFFFF;
+  --bad: #B42318;
+  --bad-bg: #FDECEA;
+  --warn: #8A5200;
+  --warn-bg: #FFF3DC;
+  --ok: #1E6B45;
+  --ok-bg: #E3F4EA;
+  --font-display: "Bricolage Grotesque", "IBM Plex Sans", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E141C; --surface: #161E29; --ink: #E7ECF3; --muted: #9AA8B8; --line: #263243;
+    --accent: #7EA2FF; --accent-ink: #0E141C;
+    --bad: #FF8A7E; --bad-bg: #3A1A18; --warn: #F2B85B; --warn-bg: #35280F; --ok: #6FD39B; --ok-bg: #12301F;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0E141C; --surface: #161E29; --ink: #E7ECF3; --muted: #9AA8B8; --line: #263243;
+  --accent: #7EA2FF; --accent-ink: #0E141C;
+  --bad: #FF8A7E; --bad-bg: #3A1A18; --warn: #F2B85B; --warn-bg: #35280F; --ok: #6FD39B; --ok-bg: #12301F;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.45;
+  padding-block: 24px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: 30px; line-height: 1.1; }
+h2 { font-size: 18px; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+.sync { color: var(--muted); font-size: 13px; }
+
+.stats { display: flex; flex-wrap: wrap; gap: 10px; }
+.stat { flex: 1 1 150px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+.stat b { display: block; font-family: var(--font-data); font-weight: 500; font-size: 28px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 13px; }
+.stat.out b { color: var(--bad); } .stat.low b { color: var(--warn); } .stat.ok b { color: var(--ok); }
+
+.alerts { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.alerts header { padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; border-bottom: 1px solid var(--line); }
+.alerts header p { margin: 0; color: var(--muted); font-size: 13px; }
+.alerts.hot header { background: var(--bad-bg); }
+.alerts ul { list-style: none; margin: 0; padding: 0; }
+.alerts li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 10px 16px; border-top: 1px solid var(--line); }
+.alerts li:first-child { border-top: 0; }
+.alerts .who { min-width: 0; }
+.alerts .who small { color: var(--muted); display: block; }
+.alerts .qn { font-family: var(--font-data); font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); }
+.allgood { padding: 16px; color: var(--ok); font-weight: 500; }
+
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.pill.out { background: var(--bad-bg); color: var(--bad); }
+.pill.low { background: var(--warn-bg); color: var(--warn); }
+.pill.ok { background: var(--ok-bg); color: var(--ok); }
+
+.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 320px; min-width: 0; }
+.chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 5px 12px; cursor: pointer; font-size: 14px; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.chip em { font-style: normal; font-family: var(--font-data); font-size: 12px; color: var(--bad); margin-left: 6px; }
+.chip[aria-pressed="true"] em { color: inherit; }
+.search { flex: 1 1 200px; max-width: 280px; }
+input[type=text], input[type=search], input[type=email], input[type=number], input[type=password], select, textarea {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; min-width: 0; width: 100%;
+}
+textarea { min-height: 120px; font-family: var(--font-data); font-size: 13px; }
+
+.list { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) auto 140px 150px; gap: 8px 14px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line); }
+.row:first-child { border-top: 0; }
+.row.out { background: color-mix(in srgb, var(--bad-bg) 55%, transparent); }
+.nm { min-width: 0; display: flex; flex-direction: column; }
+.nm strong { font-weight: 500; overflow-wrap: anywhere; }
+.nm small { color: var(--muted); }
+.qty { display: flex; align-items: center; gap: 4px; }
+.qty input { width: 72px; text-align: center; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.mn { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.mn input { width: 64px; font-family: var(--font-data); font-variant-numeric: tabular-nums; text-align: center; }
+.st { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sq { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-size: 18px; line-height: 1; }
+.sq:hover { border-color: var(--accent); }
+.btn { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 8px; padding: 8px 14px; font-weight: 600; cursor: pointer; }
+.btn.ghost, .ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 13px; font-weight: 400; }
+.ghost.sure { color: var(--bad); border-color: var(--bad); }
+.empty { padding: 28px 18px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.empty p { margin: 0; color: var(--muted); max-width: 56ch; }
+
+details.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+details.panel > summary { padding: 12px 16px; cursor: pointer; font-weight: 600; list-style-position: inside; }
+details.panel > div { padding: 4px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+label.f { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); min-width: 0; }
+.hint { color: var(--muted); font-size: 13px; margin: 0; }
+.storeline { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+.hist { font-size: 13px; display: flex; flex-direction: column; }
+.hist div { display: flex; flex-wrap: wrap; gap: 2px 12px; justify-content: space-between; padding: 5px 0; border-top: 1px solid var(--line); }
+.hist .d { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.hist .pos { color: var(--ok); } .hist .neg { color: var(--bad); }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 10px; font-size: 14px; max-width: calc(100% - 32px); z-index: 20; }
+
+.login { display: flex; justify-content: center; padding-top: 6vh; }
+.logincard { width: 100%; max-width: 380px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+.logincard .btn:disabled { opacity: .55; cursor: default; }
+.err { margin: 0; color: var(--bad); font-size: 13px; min-height: 1.2em; }
+.bulkqty { flex-direction: column; align-items: stretch; gap: 6px; min-width: 230px; }
+.bulkqty .bq { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.bulkqty .bq input { width: 72px; }
+.bulkqty .bq .ghost { margin-left: auto; padding: 4px 8px; }
+.bulkqty .bq .ghost:disabled { opacity: .5; cursor: default; }
+.openbar { height: 6px; background: var(--line); border-radius: 999px; overflow: hidden; }
+.openbar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.nm .stock { color: var(--ink); }
+.nm .stock b { font-weight: 600; }
+.un { color: var(--muted); font-size: 12px; margin-left: 2px; }
+.sale-total { font-family: var(--font-data); font-size: 26px; font-variant-numeric: tabular-nums; align-self: flex-end; margin-left: auto; }
+#p-sale { border-color: var(--accent); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card h2 { font-size: 16px; }
+.card .hint { margin: 0; }
+.chart { position: relative; min-height: 220px; }
+.chart svg { display: block; width: 100%; height: 220px; overflow: visible; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .axis { fill: var(--muted); font: 11px var(--font-data); }
+.chart .ln { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .area { fill: var(--accent); opacity: .12; }
+.chart .dot { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.chart .barm { fill: var(--accent); }
+.chart .goal { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: .7; }
+.chart .goaltxt { fill: var(--ink); font: 600 11px var(--font-body); }
+.chart .hit { fill: transparent; cursor: crosshair; }
+.chart .cross { stroke: var(--muted); stroke-width: 1; }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--bg); font-size: 12px; padding: 6px 9px; border-radius: 8px; white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); z-index: 3; }
+.tip b { font-family: var(--font-data); font-weight: 500; }
+.progress { height: 14px; background: var(--line); border-radius: 999px; overflow: hidden; }
+.progress > div { height: 100%; background: var(--accent); border-radius: 999px; }
+.progress.done > div { background: var(--ok); }
+.goalrow { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 16px; }
+.goalrow b { font-family: var(--font-data); font-weight: 500; font-size: 24px; font-variant-numeric: tabular-nums; }
+.hbar { display: grid; grid-template-columns: minmax(0, 160px) 1fr auto; gap: 6px 10px; align-items: center; font-size: 14px; }
+.hbar span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbar .trk { height: 12px; }
+.hbar .trk > div { height: 100%; background: var(--accent); border-radius: 0 4px 4px 0; min-width: 2px; }
+.hbar .v { font-family: var(--font-data); font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.qr { align-self: center; background: #fff; padding: 8px; border-radius: 10px; width: 200px; height: 200px; }
+.secret { font-family: var(--font-data); font-size: 13px; overflow-wrap: anywhere; user-select: all; }
+#m-code { font-family: var(--font-data); font-size: 22px; letter-spacing: .3em; text-align: center; }
+.pw { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pw input { width: 160px; }
+.me { display: inline-flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.role-staff .admin-only { display: none !important; }
+
+.more-btn { align-self: flex-start; margin-top: 4px; }
+.extra { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 10px; padding-top: 4px; }
+.extra label { flex: 1 1 160px; }
+.tablewrap { overflow-x: auto; }
+.tablewrap table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.tablewrap th, .tablewrap td { padding: 6px 10px; text-align: left; border-top: 1px solid var(--line); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tablewrap th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; border-top: 0; }
+.tablewrap tfoot td { font-weight: 600; }
+.tablewrap .pos { color: var(--ok); }
+.tablewrap .neg { color: var(--bad); }
+.orderlist h3 { font-size: 14px; margin: 12px 0 4px; font-family: var(--font-display); }
+.orderlist ul { list-style: none; margin: 0; padding: 0; }
+.orderlist li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; padding: 5px 0; border-top: 1px solid var(--line); }
+.orderlist .qn { font-family: var(--font-data); font-size: 13px; color: var(--muted); }
+
+.tabs { display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; background: var(--bg); padding-top: 4px; scrollbar-width: thin; }
+.tabs button { background: none; border: 0; border-bottom: 3px solid transparent; padding: 10px 14px; cursor: pointer; color: var(--muted); font-weight: 500; white-space: nowrap; margin-bottom: -1px; }
+.tabs button:hover { color: var(--ink); }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.tab { display: flex; flex-direction: column; gap: 20px; }
+[hidden] { display: none !important; }
+.tab > .lead { margin: 0; color: var(--muted); max-width: 70ch; }
+@media (max-width: 680px) {
+  h1 { font-size: 26px; }
+  .row { grid-template-columns: minmax(0, 1fr) auto; }
+  .row .mn { grid-column: 1; }
+  .row .st { grid-column: 2; grid-row: 1; justify-content: flex-end; }
+  .row .qty { grid-column: 2; grid-row: 2; }
+  .row .mn { grid-row: 2; }
+  .search { max-width: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<main class="login" id="login">
+  <form class="logincard" id="f-login">
+    <h1>Sistema Forrajera</h1>
+    <p class="hint" id="l-hint">Conectando…</p>
+    <label class="f" id="l-name-wrap" hidden>Tu nombre<input type="text" id="l-name" maxlength="40" autocomplete="name"></label>
+    <label class="f">Usuario<input type="text" id="l-user" autocomplete="username" autocapitalize="none" required></label>
+    <label class="f">Contraseña<input type="password" id="l-pass" autocomplete="current-password" required></label>
+    <label class="f" id="l-pass2-wrap" hidden>Repite la contraseña<input type="password" id="l-pass2" autocomplete="new-password"></label>
+    <button class="btn" type="submit" id="l-go" disabled>Entrar</button>
+    <p class="err" id="l-err" role="alert"></p>
+  </form>
+  <form class="logincard" id="f-mfa" hidden>
+    <h1>Código de seguridad</h1>
+    <div id="m-setup" hidden>
+      <p class="hint"><b>Configura tu autenticador (solo esta vez).</b> Instala Google Authenticator o Microsoft Authenticator en tu celular, toca «+» y escanea este código.</p>
+      <img id="m-qr" class="qr" alt="Código QR para el autenticador" width="200" height="200">
+      <p class="hint">¿No puedes escanear? Elige «Ingresar clave» y escribe: <code id="m-secret" class="secret"></code></p>
+    </div>
+    <p class="hint" id="m-hint">Abre tu app autenticadora y escribe el código de 6 dígitos de Forrajera.</p>
+    <label class="f">Código de 6 dígitos<input type="text" id="m-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required></label>
+    <button class="btn" type="submit" id="m-go">Verificar</button>
+    <button class="ghost" type="button" id="m-back">Volver</button>
+    <p class="err" id="m-err" role="alert"></p>
+  </form>
+</main>
+
+<div class="wrap" id="app" hidden>
+  <div class="top">
+    <h1>Sistema Forrajera</h1>
+    <span class="sync me"><span id="sync" role="status">Conectando…</span><span id="whoami"></span><button class="btn" id="rep-quick" type="button">Reporte de historial</button><button class="ghost" id="logout" type="button">Salir</button></span>
+  </div>
+
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Secciones">
+    <button type="button" role="tab" data-tab="inv" aria-selected="true">Inventario</button>
+    <button type="button" role="tab" data-tab="ven" aria-selected="false">Ventas</button>
+    <button type="button" role="tab" data-tab="buy" aria-selected="false">Compras</button>
+    <button type="button" role="tab" data-tab="rep" aria-selected="false">Reportes</button>
+    <button type="button" role="tab" class="admin-only" data-tab="adm" aria-selected="false">Administración</button>
+    <button type="button" role="tab" class="admin-only" data-tab="me" aria-selected="false">Mi cuenta</button>
+  </nav>
+  <section class="tab" data-tab="inv">
+  <div class="stats" id="stats"></div>
+  <section class="alerts" id="alerts" aria-live="polite"></section>
+
+  <div class="bar">
+    <div class="chips" id="chips"></div>
+    <select id="f-cat" aria-label="Filtrar por categoría" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit"><option value="all">Todas las categorías</option><option value="alim">Alimento balanceado</option><option value="gran">Granos y semillas</option><option value="forr">Forrajes y pacas</option><option value="sal">Sales y minerales</option><option value="med">Medicinas y vitaminas</option><option value="acc">Accesorios</option><option value="otro">Otros</option></select>
+    <input class="search" id="search" type="search" placeholder="Buscar producto" aria-label="Buscar producto">
+  </div>
+
+  <section class="list" id="list"></section>
+  </section>
+  <section class="tab" data-tab="ven" hidden>
+    <p class="lead">Registra cada venta por bulto o a granel (por kilo). Los bultos salen de los <b>cerrados</b> y el granel del <b>bulto abierto</b>; si el abierto no alcanza, el sistema abre uno nuevo solo y lo anota.</p>
+    <section class="card" id="p-sale">
+      <h2>Nueva venta</h2>
+      <form id="f-sale" class="grid">
+        <label class="f">Producto<select id="s-item"></select></label>
+        <label class="f">Se vende por<select id="s-mode"></select></label>
+        <label class="f">Cantidad<input type="number" id="s-qty" min="0" step="any" inputmode="decimal" placeholder="Bultos, kg o piezas"></label>
+        <label class="f">Precio por unidad<input type="number" id="s-price" min="0" step="any" inputmode="decimal"></label>
+        <div style="align-self:end"><button class="btn" type="submit">Agregar a la nota</button></div>
+      </form>
+      <p class="hint" id="s-hint"></p>
+      <div id="s-cart"></div>
+      <div class="bar">
+        <label class="f" style="flex:1 1 240px">Cliente (opcional)<input type="text" id="s-client" maxlength="60" placeholder="Nombre del cliente"></label>
+        <span class="sale-total" id="s-total"></span>
+        <button class="btn" type="button" id="s-go" disabled style="align-self:flex-end">Cobrar y registrar venta</button>
+        <button class="ghost" type="button" id="s-clear" style="align-self:flex-end">Vaciar nota</button>
+      </div>
+      <p class="hint" id="s-msg" role="status"></p>
+    </section>
+    <div class="bar">
+      <label class="f" style="flex:0 1 220px">Mes<select id="v-month"></select></label>
+      <label class="f admin-only" style="flex:0 1 260px">Tienda<select id="v-store"></select></label>
+    </div>
+    <div class="stats" id="v-stats"></div>
+    <section class="card" id="v-goal"></section>
+    <section class="card"><h2>Ventas acumuladas del mes</h2><p class="hint" id="v-cum-hint"></p><div class="chart" id="v-cum"></div></section>
+    <section class="card"><h2>Ventas por mes</h2><p class="hint">Últimos 6 meses.</p><div class="chart" id="v-months"></div></section>
+    <section class="card"><h2>Ventas por producto</h2><div id="v-prods"></div></section>
+    <section class="card admin-only"><h2>Precio de compra por producto</h2><p class="hint">Cómo ha cambiado lo que pagas por bulto o pieza a tus proveedores.</p>
+      <label class="f" style="max-width:360px">Producto<select id="v-ins"></select></label><div class="chart" id="v-price"></div></section>
+    <section class="card"><h2>Últimas ventas</h2><div id="v-list"></div></section>
+  </section>
+  <section class="tab" data-tab="buy" hidden>
+    <p class="lead">Cuando te llega mercancía del proveedor, regístrala aquí y el inventario sube solo.</p>
+  <details class="panel" id="p-buy" open>
+    <summary>Registrar compra</summary>
+    <div>
+      <p class="hint">Cada compra suma al inventario. Puedes registrarla en bultos o en kilos. Si escribes costo o proveedor, se actualizan en el producto y salen en los reportes.</p>
+      <form id="f-buy" class="grid">
+        <label class="f">Producto<select id="by-item"></select></label>
+        <label class="f">Compraste en<select id="by-mode"></select></label>
+        <label class="f">Cantidad comprada<input type="number" id="by-qty" min="0" step="any" required></label>
+        <label class="f" id="by-cost-l">Costo por bulto (opcional)<input type="number" id="by-cost" min="0" step="any"></label>
+        <label class="f">Proveedor (opcional)<input type="text" id="by-sup" maxlength="60"></label>
+        <label class="f">Factura o nota (opcional)<input type="text" id="by-doc" maxlength="40"></label>
+      </form>
+      <div class="bar"><button class="btn" type="submit" form="f-buy" id="by-go">Registrar compra</button></div>
+    </div>
+  </details>
+  <details class="panel" id="p-buylist" open>
+    <summary>Compras recientes</summary>
+    <div><div id="by-out"></div></div>
+  </details>
+  </section>
+  <section class="tab" data-tab="rep" hidden>
+  <details class="panel" id="p-rep">
+    <summary>Reporte de historial del inventario</summary>
+    <div>
+      <p class="hint" style="margin-top:0"><b>¿Qué reporte quieres?</b> Elige una opción para generarlo.</p>
+      <div class="chips" id="r-types" style="margin-bottom:10px"><button class="chip" type="button" data-rcat="all" aria-pressed="false">Reporte general</button><button class="chip" type="button" data-rcat="alim" aria-pressed="false">Alimento balanceado</button><button class="chip" type="button" data-rcat="gran" aria-pressed="false">Granos y semillas</button><button class="chip" type="button" data-rcat="forr" aria-pressed="false">Forrajes</button><button class="chip" type="button" data-rcat="sal" aria-pressed="false">Sales y minerales</button><button class="chip" type="button" data-rcat="med" aria-pressed="false">Medicinas</button><button class="chip" type="button" data-rcat="acc" aria-pressed="false">Accesorios</button></div>
+      <div class="grid">
+        <label class="f">Periodo<select id="r-period"><option value="1">Hoy</option><option value="7" selected>Últimos 7 días</option><option value="30">Últimos 30 días</option><option value="60">Últimos 60 días</option></select></label>
+        <label class="f">Tienda<select id="r-store"></select></label>
+        <select id="r-cat" hidden><option value="all">General</option><option value="alim">Alimento balanceado</option><option value="gran">Granos y semillas</option><option value="forr">Forrajes y pacas</option><option value="sal">Sales y minerales</option><option value="med">Medicinas y vitaminas</option><option value="acc">Accesorios</option><option value="otro">Otros</option></select>
+      </div>
+      <div class="bar">
+        <button class="btn" id="r-go" type="button">Generar reporte</button>
+        <button class="btn" id="r-pdf" type="button" disabled>Descargar PDF</button>
+        <button class="btn" id="r-png" type="button" disabled>Descargar imagen</button>
+        <button class="ghost" id="r-copy" type="button" disabled>Copiar reporte</button>
+        <button class="ghost" id="r-csv" type="button" disabled>Descargar historial (CSV)</button>
+        <span class="hint" id="r-msg"></span>
+      </div>
+      <div id="r-out"></div>
+    </div>
+  </details>
+
+  <details class="panel admin-only" id="p-acc" open>
+    <summary>Cuentas del inventario</summary>
+    <div>
+      <div id="acc-sum"></div>
+      <h2 style="font-size:15px">Por categoría</h2>
+      <div id="acc-cat"></div>
+      <h2 style="font-size:15px">Pedido sugerido</h2>
+      <p class="hint">Lo que está bajo o agotado, con la cantidad para llegar a la cantidad ideal de cada producto (si no la defines, usa el doble del mínimo).</p>
+      <div id="acc-order" class="orderlist"></div>
+      <div class="bar"><button class="btn" id="acc-copy" type="button" disabled>Copiar pedido</button></div>
+    </div>
+  </details>
+
+  <details class="panel admin-only" id="p-hist">
+    <summary>Historial de movimientos</summary>
+    <div><div class="hist" id="hist"></div></div>
+  </details>
+  </section>
+  <section class="tab" data-tab="adm" hidden>
+  <details class="panel admin-only" id="p-add">
+    <summary>Agregar producto</summary>
+    <div>
+      <form id="f-add" class="grid">
+        <label class="f">Producto<input type="text" id="a-name" required maxlength="80"></label>
+        <label class="f">Tienda<select id="a-store" required></select></label>
+        <label class="f">Categoría<select id="a-cat"><option value="alim">Alimento balanceado</option><option value="gran">Granos y semillas</option><option value="forr">Forrajes y pacas</option><option value="sal">Sales y minerales</option><option value="med">Medicinas y vitaminas</option><option value="acc">Accesorios</option><option value="otro">Otros</option></select></label>
+        <label class="f">¿Cómo se vende?<select id="a-sell"><option value="bulk">Por bulto y a granel (kg)</option><option value="piece">Por pieza (paca, frasco, accesorio…)</option></select></label>
+        <label class="f bulk-only">Kg por bulto<input type="number" id="a-bag" min="0" step="any" value="40"></label>
+        <label class="f piece-only" hidden>Unidad<input type="text" id="a-unit" placeholder="pzas, pacas, frascos" maxlength="16"></label>
+        <label class="f"><span class="u-q">Bultos cerrados (sin abrir)</span><input type="number" id="a-qty" min="0" step="any" value="0" required></label>
+        <label class="f bulk-only">Kg en el bulto abierto (si hay uno)<input type="number" id="a-loose" min="0" step="any" placeholder="0"></label>
+        <label class="f"><span class="u-m">Avisar cuando baje de (bultos)</span><input type="number" id="a-min" min="0" step="any" value="5" required></label>
+        <label class="f"><span class="u-c">Costo por bulto (compra)</span><input type="number" id="a-cost" min="0" step="any"></label>
+        <label class="f"><span class="u-p">Precio de venta por bulto</span><input type="number" id="a-price" min="0" step="any"></label>
+        <label class="f bulk-only">Precio por kg a granel<input type="number" id="a-pricekg" min="0" step="any"></label>
+        <label class="f">Proveedor (opcional)<input type="text" id="a-supplier" maxlength="60"></label>
+        <label class="f"><span class="u-x">Cantidad ideal en bultos (opcional)</span><input type="number" id="a-max" min="0" step="any"></label>
+      </form>
+      <div><button class="btn" type="submit" form="f-add">Agregar</button></div>
+    </div>
+  </details>
+
+  <details class="panel admin-only" id="p-import">
+    <summary>Importar lista de productos</summary>
+    <div>
+      <p class="hint">Pega una lista copiada de Excel, un producto por línea, con las columnas: <b>producto, cantidad (bultos o piezas), mínimo, kg por bulto, costo, precio de venta, precio por kg y proveedor</b>. Deja «kg por bulto» en 0 o vacío para lo que se vende por pieza. Funciona separado por tabulador, coma o punto y coma. Los productos que ya existen en esa tienda se omiten.</p>
+      <label class="f">Tienda<select id="i-store"></select></label>
+      <label class="f">Categoría de toda la lista<select id="i-cat"><option value="alim">Alimento balanceado</option><option value="gran">Granos y semillas</option><option value="forr">Forrajes y pacas</option><option value="sal">Sales y minerales</option><option value="med">Medicinas y vitaminas</option><option value="acc">Accesorios</option><option value="otro">Otros</option></select></label>
+      <label class="f">Lista<textarea id="i-text" placeholder="Harina de trigo, 80, 50, kg&#10;Cacao en polvo, 12, 15, kg"></textarea></label>
+      <div class="bar"><button class="btn" id="i-go" type="button">Importar</button><span class="hint" id="i-msg"></span></div>
+    </div>
+  </details>
+
+  <details class="panel admin-only" id="p-set">
+    <summary>Avisos y tiendas</summary>
+    <div>
+      <p class="hint">Los productos que bajan de su mínimo aparecen siempre en «Alertas de stock». Guarda aquí el correo donde quieres recibir los avisos automáticos.</p>
+      <form id="f-mail" class="bar">
+        <label class="f" style="flex:1 1 260px">Correo para los avisos<input type="email" id="s-mail" placeholder="tucorreo@gmail.com" autocomplete="email"></label>
+        <button class="btn" type="submit" style="align-self:flex-end">Guardar correo</button>
+      </form>
+      <form id="f-store" class="bar">
+        <label class="f" style="flex:1 1 260px">Nueva tienda<input type="text" id="s-store" maxlength="60" placeholder="Nombre de la tienda"></label>
+        <button class="btn" type="submit" style="align-self:flex-end">Agregar tienda</button>
+      </form>
+      <div id="storelist"></div>
+    </div>
+  </details>
+
+  <details class="panel admin-only" id="p-users">
+    <summary>Usuarios y contraseñas</summary>
+    <div>
+      <p class="hint">Crea un usuario para cada encargado. El encargado solo ve y actualiza las cantidades de su tienda. Tú, como administrador, ves todo y cambias mínimos, productos, tiendas y usuarios.</p>
+      <form id="f-user" class="grid">
+        <label class="f">Nombre<input type="text" id="u-name" maxlength="40" required></label>
+        <label class="f">Usuario<input type="text" id="u-user" maxlength="30" autocomplete="off" autocapitalize="none" required></label>
+        <label class="f">Contraseña (mínimo 8)<input type="password" id="u-pass" autocomplete="new-password" minlength="8" required></label>
+        <label class="f">Rol<select id="u-role"><option value="staff">Encargado de tienda</option><option value="admin">Administrador</option></select></label>
+        <label class="f">Tienda del encargado<select id="u-store"></select></label>
+      </form>
+      <div><button class="btn" type="submit" form="f-user">Crear usuario</button></div>
+      <div id="userlist"></div>
+    </div>
+  </details>
+
+  <details class="panel admin-only" id="p-backup">
+    <summary>Respaldo de los datos</summary>
+    <div>
+      <p class="hint">Descarga una copia de tiendas, productos, recetas, producción e historial (sin usuarios ni contraseñas). Guárdala en un lugar seguro: sirve si alguien borra datos por error o si reinicias el sistema.</p>
+      <div class="bar"><button class="btn" type="button" id="bk-dl">Descargar respaldo</button></div>
+      <p class="hint">Para restaurar, elige el archivo de respaldo y escribe RESTAURAR. Los registros del respaldo se vuelven a crear o se sobrescriben; no se borra nada.</p>
+      <div class="grid">
+        <label class="f">Archivo de respaldo<input type="file" id="bk-file" accept=".json,application/json"></label>
+        <label class="f">Escribe RESTAURAR<input type="text" id="bk-word" autocomplete="off" autocapitalize="characters"></label>
+      </div>
+      <div class="bar"><button class="btn" type="button" id="bk-go">Restaurar respaldo</button><span class="hint" id="bk-msg" role="status"></span></div>
+    </div>
+  </details>
+  <details class="panel admin-only" id="p-reset">
+    <summary>Reiniciar el sistema</summary>
+    <div>
+      <p class="hint">Borra los productos, recetas, producción y el historial de movimientos para empezar de cero. No se puede deshacer. Solo el administrador que tenga la clave de reinicio puede hacerlo.</p>
+      <div id="rs-setup" hidden>
+        <p class="hint">Primero crea la clave de reinicio. Es distinta de tu contraseña de acceso, y la necesitarás cada vez que reinicies.</p>
+        <form id="f-rskey" class="grid">
+          <label class="f">Clave de reinicio (mínimo 8)<input type="password" id="rs-new" minlength="8" autocomplete="new-password" required></label>
+          <label class="f">Repite la clave<input type="password" id="rs-new2" autocomplete="new-password" required></label>
+        </form>
+        <div><button class="btn" type="submit" form="f-rskey">Guardar clave</button></div>
+      </div>
+      <div id="rs-run" hidden>
+        <form id="f-reset" class="grid">
+          <label class="f">Qué borrar<select id="rs-scope"><option value="inv">Productos y historial (conserva tiendas y usuarios)</option><option value="all">Productos, historial y tiendas (conserva usuarios)</option></select></label>
+          <label class="f">Clave de reinicio<input type="password" id="rs-key" autocomplete="off" required></label>
+          <label class="f">Escribe REINICIAR para confirmar<input type="text" id="rs-word" autocomplete="off" autocapitalize="characters" required></label>
+        </form>
+        <div class="bar"><button class="btn" type="submit" form="f-reset" id="rs-go">Reiniciar ahora</button><span class="hint" id="rs-msg" role="status"></span></div>
+        <p class="hint" id="rs-last"></p>
+        <details>
+          <summary class="hint">Cambiar la clave de reinicio</summary>
+          <form id="f-rschange" class="grid">
+            <label class="f">Clave actual<input type="password" id="rs-cur" autocomplete="off" required></label>
+            <label class="f">Clave nueva (mínimo 8)<input type="password" id="rs-chg" minlength="8" autocomplete="new-password" required></label>
+            <div style="align-self:end"><button class="btn" type="submit">Cambiar clave</button></div>
+          </form>
+        </details>
+      </div>
+    </div>
+  </details>
+  </section>
+  <section class="tab" data-tab="me" hidden>
+  <details class="panel" id="p-me">
+    <summary>Cambiar mi contraseña</summary>
+    <div>
+      <form id="f-pw" class="grid">
+        <label class="f">Contraseña actual<input type="password" id="pw-cur" autocomplete="current-password" required></label>
+        <label class="f">Contraseña nueva (mínimo 8)<input type="password" id="pw-new" autocomplete="new-password" minlength="8" required></label>
+      </form>
+      <div><button class="btn" type="submit" form="f-pw">Guardar</button></div>
+    </div>
+  </details>
+  </section>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="app.js"></script>
+
+</body></html>
