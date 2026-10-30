@@ -1,5 +1,5 @@
 /* Guarda la pantalla del sistema para que abra rápido. Los datos siempre vienen de Supabase. */
-var CACHE = 'forrajera-v2';
+var CACHE = 'forrajera-v3';
 var SHELL = ['./', 'index.html', 'app.js', 'config.js', 'db.js', 'vendor/supabase-2.45.4.min.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', function (e) {
@@ -19,4 +19,11 @@ self.addEventListener('fetch', function (e) {
     caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
     return res;
   }).catch(function () { return caches.match(e.request).then(function (r) { return r || caches.match('index.html'); }); }));
+});
+// al tocar un aviso del inventario se abre (o se trae al frente) la app
+self.addEventListener('notificationclick', function (e) {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
+    return list.length ? list[0].focus() : self.clients.openWindow('./');
+  }));
 });

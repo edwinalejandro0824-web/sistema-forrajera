@@ -141,6 +141,12 @@ label.f { display: flex; flex-direction: column; gap: 4px; font-size: 13px; colo
 .bulkqty .bq input { width: 72px; }
 .bulkqty .bq .ghost { margin-left: auto; padding: 4px 8px; }
 .bulkqty .bq .ghost:disabled { opacity: .5; cursor: default; }
+.dlg { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink); padding: 20px; width: min(440px, calc(100% - 32px)); }
+.dlg::backdrop { background: rgba(0,0,0,.45); }
+.dlg form { display: flex; flex-direction: column; gap: 12px; }
+.dlg h2 { font-size: 19px; }
+.alerts .ahead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.tabcount { font-style: normal; font-family: var(--font-data); font-size: 11px; background: var(--bad); color: var(--surface); border-radius: 999px; padding: 1px 7px; margin-left: 4px; }
 .openbar { height: 6px; background: var(--line); border-radius: 999px; overflow: hidden; }
 .openbar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
 .nm .stock { color: var(--ink); }
@@ -326,6 +332,20 @@ label.f { display: flex; flex-direction: column; gap: 4px; font-size: 13px; colo
   </details>
   </section>
   <section class="tab" data-tab="rep" hidden>
+  <details class="panel" id="p-vr" open>
+    <summary>Reporte de ventas e inventario (PDF)</summary>
+    <div>
+      <p class="hint">Qué se vendió (por producto, en bultos, a granel y por nota), las compras, los bultos que se abrieron y cómo va el inventario de cada producto. Elige si lo quieres del día, de la semana o del mes.</p>
+      <div class="grid">
+        <label class="f">Tipo de reporte<select id="vr-kind"><option value="dia">Diario</option><option value="semana">Semanal</option><option value="mes" selected>Mensual</option></select></label>
+        <label class="f" id="vr-day-l" hidden>Día<input type="date" id="vr-day"></label>
+        <label class="f" id="vr-month-l">Mes<input type="month" id="vr-month"></label>
+        <label class="f admin-only">Tienda<select id="vr-store"></select></label>
+      </div>
+      <div class="bar"><button class="btn" id="vr-go" type="button">Ver reporte</button><button class="btn" id="vr-pdf" type="button" disabled>Descargar PDF</button><span class="hint" id="vr-msg" role="status"></span></div>
+      <div id="vr-out"></div>
+    </div>
+  </details>
   <details class="panel" id="p-rep">
     <summary>Reporte de historial del inventario</summary>
     <div>
@@ -491,6 +511,17 @@ label.f { display: flex; flex-direction: column; gap: 4px; font-size: 13px; colo
   </details>
   </section>
 </div>
+<dialog id="open-dlg" class="dlg" aria-labelledby="od-title">
+  <form id="f-open">
+    <h2 id="od-title">¿Qué bulto abriste?</h2>
+    <p class="hint" id="od-text"></p>
+    <label class="f">Bulto que abriste<select id="od-item"></select></label>
+    <label class="f">Cuántos bultos<input type="number" id="od-n" min="1" step="1" value="1" inputmode="numeric"></label>
+    <label class="f" id="od-why-l" hidden>Motivo<select id="od-why"><option value="granel">Para venta a granel</option><option value="merma">Se dañó o se tiró (dar de baja)</option></select></label>
+    <p class="err" id="od-err" role="alert"></p>
+    <div class="bar"><button class="btn" type="submit" value="ok">Abrir y descontar</button><button class="ghost" type="submit" value="cancel" formnovalidate>Cancelar</button></div>
+  </form>
+</dialog>
 <div class="toast" id="toast" hidden></div>
 
 <script src="app.js"></script>

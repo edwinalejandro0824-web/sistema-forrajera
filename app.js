@@ -42,6 +42,41 @@
     var b = Math.floor(q / i.bag + 1e-9), k = Math.round((q - b * i.bag) * 100) / 100;
     return (b ? fmt(b) + (b === 1 ? ' bulto' : ' bultos') : '') + (b && k ? ' + ' : '') + (k || !b ? fmt(k) + ' kg' : '');
   }
+  // avisos de bultos aunque el total esté bien: ya no hay cerrados, o el abierto está por terminarse (≤ 15 % del bulto)
+  function bagWarn(i) {
+    if (!isBulk(i) || i.qty <= 0) return '';
+    var st = bulkState(i);
+    if (st.closed === 0) return 'ya no quedan bultos cerrados (solo ' + fmt(st.open) + ' kg abiertos)';
+    if (st.open > 0 && st.open <= i.bag * 0.15) return 'el bulto abierto se está terminando (' + fmt(st.open) + ' kg)';
+    return '';
+  }
+  function alertLevel(i) { var s = status(i); return s !== 'ok' ? s : (bagWarn(i) ? 'warn' : ''); }
+  // compara con lo que ya se había visto y avisa solo lo nuevo (también si el cambio lo hizo otro usuario)
+  var stockSeen = null, summaryShown = false;
+  function watchStock(list) {
+    var rank = { '': 0, warn: 1, low: 2, out: 3 }, now = {}, news = [];
+    list.forEach(function (i) { var lv = alertLevel(i); now[i.id] = lv; if (stockSeen && rank[lv] > rank[stockSeen[i.id] || '']) news.push({ i: i, lv: lv }); });
+    if (!stockSeen && !summaryShown) {
+      summaryShown = true;
+      var n = list.filter(function (i) { return status(i) !== 'ok'; }).length;
+      if (n) notify('Inventario', n + (n === 1 ? ' producto necesita' : ' productos necesitan') + ' reposición.', false);
+    }
+    stockSeen = now;
+    news.slice(0, 5).forEach(function (x) {
+      var title = (x.lv === 'out' ? 'Se agotó: ' : x.lv === 'low' ? 'Por agotarse: ' : 'Aviso: ') + x.i.name;
+      var body = x.lv === 'warn' ? bagWarn(x.i) : 'Quedan ' + qtyText(x.i).replace(/&[^;]+;/g, '') + ' (mínimo ' + qtyText(x.i, x.i.min).replace(/&[^;]+;/g, '') + ').';
+      notify(title, body, true);
+    });
+  }
+  // aviso en pantalla y, si se permitió, notificación del celular o la computadora
+  function notify(title, body, sys) {
+    toast(title + ' · ' + body);
+    if (!sys || !('Notification' in window) || Notification.permission !== 'granted') return;
+    var opts = { body: body, icon: 'icon-192.png', badge: 'icon-192.png', tag: 'stock-' + title };
+    var plain = function () { try { new Notification(title, opts); } catch (e) {} };
+    if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(function (r) { return r.showNotification(title, opts); }).catch(plain);
+    else plain();
+  }
   function orderStr(i) { var q = toOrder(i); return isBulk(i) ? fmt(Math.ceil(q / i.bag)) + ' bultos' : fmt(q) + ' ' + esc(baseUnit(i)); }
   function storeName(id) { var s = stores.find(function (x) { return x.id === id; }); return s ? s.name : 'Sin tienda'; }
 
@@ -64,18 +99,27 @@
       '<div class="stat ok"><b>' + ok + '</b><span>En orden</span></div>' +
       (isAdmin() && val > 0 ? '<div class="stat"><b style="font-size:22px">' + money(val) + '</b><span>Valor del inventario</span></div>' : '');
 
+    // reposición (agotado / por agotarse) y avisos de bultos (sin cerrados, abierto por terminarse)
     var hot = items.filter(function (i) { return status(i) !== 'ok'; })
       .sort(function (x, y) { return (status(x) === 'out' ? 0 : 1) - (status(y) === 'out' ? 0 : 1) || x.name.localeCompare(y.name, 'es'); });
-    var mail = !isAdmin() ? 'Lo que se está acabando en tu tienda.' : settings.email ? 'Correo de avisos: ' + esc(settings.email) + '.' :'Falta tu correo para recibir avisos. Agrégalo en «Avisos y tiendas».';
-    var h = '<header><h2>' + (hot.length ? hot.length + (hot.length === 1 ? ' producto necesita reposición' : ' productos necesitan reposición') : 'Alertas de stock') + '</h2><p>' + mail + '</p></header>';
-    if (!hot.length) h += '<div class="allgood">' + (items.length ? 'Todo el inventario está por encima de su mínimo.' : 'Cuando agregues productos, aquí verás los que se estén acabando.') + '</div>';
+    var warn = items.filter(function (i) { return status(i) === 'ok' && bagWarn(i); }).sort(byName);
+    var notifTxt = !('Notification' in window) ? '' : Notification.permission === 'granted' ? ' Avisos activados en este dispositivo.' : Notification.permission === 'default' ? '' : ' Los avisos están bloqueados en este navegador.';
+    var mail = (!isAdmin() ? 'Lo que se está acabando en tu tienda.' : settings.email ? 'Correo de avisos: ' + esc(settings.email) + '.' : 'Falta tu correo para recibir avisos. Agrégalo en «Avisos y tiendas».') + notifTxt;
+    var h = '<header><div class="ahead"><h2>' + (hot.length ? hot.length + (hot.length === 1 ? ' producto necesita reposición' : ' productos necesitan reposición') : 'Alertas de stock') + '</h2>' +
+      ('Notification' in window && Notification.permission === 'default' ? '<button class="btn" type="button" id="notif-on">Activar avisos en este dispositivo</button>' : '') + '</div><p>' + mail + '</p></header>';
+    if (!hot.length && !warn.length) h += '<div class="allgood">' + (items.length ? 'Todo el inventario está por encima de su mínimo.' : 'Cuando agregues productos, aquí verás los que se estén acabando.') + '</div>';
     else h += '<ul>' + hot.slice(0, 30).map(function (i) {
       var s = status(i);
       return '<li><span class="who">' + esc(i.name) + '<small>' + esc(storeName(i.store)) + '</small></span>' +
-        '<span class="qn">' + qtyText(i) + ' de mín. ' + qtyText(i, i.min) + (toOrder(i) > 0 ? ' · pedir ' + orderStr(i) : '') + '</span>' +
+        '<span class="qn">' + qtyText(i) + ' de mín. ' + qtyText(i, i.min) + (toOrder(i) > 0 ? ' · pedir ' + orderStr(i) : '') + (bagWarn(i) ? ' · ' + bagWarn(i) : '') + '</span>' +
         '<span class="pill ' + s + '">' + LABEL[s] + '</span></li>';
-    }).join('') + (hot.length > 30 ? '<li><span class="who">y ' + (hot.length - 30) + ' más en la lista de abajo</span></li>' : '') + '</ul>';
+    }).join('') + (hot.length > 30 ? '<li><span class="who">y ' + (hot.length - 30) + ' más en la lista de abajo</span></li>' : '') +
+      warn.slice(0, 20).map(function (i) {
+        return '<li><span class="who">' + esc(i.name) + '<small>' + esc(storeName(i.store)) + '</small></span><span class="qn">' + qtyText(i) + ' · ' + bagWarn(i) + '</span><span class="pill low">Aviso</span></li>';
+      }).join('') + '</ul>';
     var el = $('#alerts'); el.className = 'alerts' + (hot.length ? ' hot' : ''); el.innerHTML = h;
+    var tb = document.querySelector('#tabs [data-tab=inv]'); tb.innerHTML = 'Inventario' + (hot.length ? ' <em class="tabcount">' + hot.length + '</em>' : '');
+    watchStock(items);
 
     var chips = '<button class="chip" data-store="all" aria-pressed="' + (filterStore === 'all') + '">Todas</button>';
     stores.forEach(function (s) {
@@ -245,6 +289,14 @@
     if (t.dataset.act === 'min') setMin(row.dataset.id, r2(v * mult));
   });
   $('#list').addEventListener('focusout', function () { setTimeout(function () { if (dirty && !($('#list').contains(document.activeElement) && document.activeElement.tagName === 'INPUT')) render(); }, 60); });
+  // permiso para mostrar notificaciones en este celular o computadora
+  $('#alerts').addEventListener('click', function (e) {
+    if (!e.target.closest('#notif-on') || !('Notification' in window)) return;
+    Notification.requestPermission().then(function (p) {
+      toast(p === 'granted' ? 'Listo: este dispositivo te avisará cuando algo se esté acabando.' : 'No se activaron los avisos. Puedes permitirlos en la configuración del navegador.');
+      renderTop();
+    });
+  });
   $('#f-cat').addEventListener('change', function (e) { filterCat = e.target.value; dirty = false; renderList(); });
   $('#search').addEventListener('input', function (e) { query = e.target.value.trim().toLowerCase(); renderList(); });
 
@@ -679,6 +731,146 @@
   $('#r-pdf').addEventListener('click', function () { exportReport('pdf'); });
   $('#r-png').addEventListener('click', function () { exportReport('png'); });
 
+  /* ---------- reporte de ventas e inventario: diario, semanal o mensual (PDF) ---------- */
+  var vrData = null;
+  function vrPeriod() {
+    var kind = $('#vr-kind').value, s, e, label;
+    if (kind === 'mes') {
+      var mv = $('#vr-month').value || today().slice(0, 7), mp = mv.split('-');
+      s = new Date(+mp[0], +mp[1] - 1, 1); e = new Date(+mp[0], +mp[1], 1); label = 'Mensual · ' + monthLabel(mv);
+    } else {
+      var d = parseYmd($('#vr-day').value || today());
+      if (kind === 'semana') { s = parseYmd(weekStart(ymd(d))); e = new Date(s); e.setDate(e.getDate() + 7); label = 'Semanal · ' + weekLabel(ymd(s)); }
+      else { s = d; e = new Date(d); e.setDate(e.getDate() + 1); label = 'Diario · ' + d.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); }
+    }
+    return { kind: kind, start: s, end: e, label: label };
+  }
+  function syncVrForm() {
+    var k = $('#vr-kind').value;
+    $('#vr-day-l').hidden = k === 'mes'; $('#vr-month-l').hidden = k !== 'mes';
+    $('#vr-day-l').firstChild.textContent = k === 'semana' ? 'Cualquier día de la semana' : 'Día';
+    if (!$('#vr-day').value) $('#vr-day').value = today();
+    if (!$('#vr-month').value) $('#vr-month').value = today().slice(0, 7);
+    var el = $('#vr-store'), sts = vStores(), sig = sts.map(function (x) { return x.id + x.name; }).join('|');
+    if (el.dataset.sig !== sig) { el.dataset.sig = sig; var c = el.value; el.innerHTML = '<option value="all">Todas las tiendas</option>' + sts.map(function (x) { return '<option value="' + esc(x.id) + '">' + esc(x.name) + '</option>'; }).join(''); if (c) el.value = c; if (!el.value) el.value = 'all'; }
+  }
+  ['#vr-kind', '#vr-day', '#vr-month', '#vr-store'].forEach(function (s) { $(s).addEventListener('change', function () { syncVrForm(); vrData = null; $('#vr-pdf').disabled = true; }); });
+  $('#p-vr').addEventListener('toggle', syncVrForm);
+  function unitsText(m) { var u = +m.units || Math.abs(+m.delta || 0); return fmt(u) + ' ' + (m.mode ? modeUnit(m.mode, u) : ''); }
+  $('#vr-go').addEventListener('click', function () {
+    if (!db || !me) return;
+    syncVrForm();
+    var P = vrPeriod(), sel = isAdmin() ? ($('#vr-store').value || 'all') : me.store;
+    $('#vr-go').disabled = true; $('#vr-msg').textContent = 'Generando…';
+    db.collection('movements').where('ts', '>=', P.start.getTime()).where('ts', '<', P.end.getTime()).orderBy('ts').limit(5000).get().then(function (snap) {
+      var mv = snap.docs.map(function (d) { return d.data(); }).filter(function (m) { return sel === 'all' || m.store === sel; });
+      vrData = buildVr(P, sel, mv, snap.size >= 5000);
+      $('#vr-out').innerHTML = vrHtml(vrData); $('#vr-pdf').disabled = false; $('#vr-msg').textContent = '';
+    }).catch(function (e) { $('#vr-msg').textContent = 'No se pudo generar el reporte.'; fail(e); })
+      .then(function () { $('#vr-go').disabled = false; });
+  });
+  function buildVr(P, sel, mv, capped) {
+    var sales = mv.filter(function (m) { return m.type === 'venta'; }), R = { P: P, sel: sel, capped: capped, store: sel === 'all' ? 'Todas las tiendas' : storeName(sel), date: new Date().toLocaleString('es-MX') };
+    R.total = 0; R.bultos = 0; R.granel = 0; R.piezas = 0;
+    var notes = {}, prods = {}, days = {};
+    sales.forEach(function (m) {
+      var amt = saleAmount(m), u = +m.units || Math.abs(+m.delta || 0), key = m.sale || ('s' + m.ts);
+      R.total += amt;
+      if (m.mode === 'bulto') R.bultos += u; else if (m.mode === 'granel') R.granel += u; else R.piezas += u;
+      var n = notes[key] = notes[key] || { folio: m.sale || '—', ts: m.ts, client: m.client || '', by: m.by || '', lines: [], total: 0 };
+      n.lines.push(m.name + ' ' + unitsText(m)); n.total += amt;
+      var p = prods[m.item] = prods[m.item] || { name: m.name, bultos: 0, granel: 0, piezas: 0, amt: 0 };
+      if (m.mode === 'bulto') p.bultos += u; else if (m.mode === 'granel') p.granel += u; else p.piezas += u; p.amt += amt;
+      var dk = ymd(new Date(m.ts)), dd = days[dk] = days[dk] || { day: dk, amt: 0, notes: {} }; dd.amt += amt; dd.notes[key] = 1;
+    });
+    R.notes = Object.keys(notes).map(function (k) { return notes[k]; }).sort(function (a, b) { return a.ts - b.ts; });
+    R.prods = Object.keys(prods).map(function (k) { return prods[k]; }).sort(function (a, b) { return b.amt - a.amt; });
+    R.days = Object.keys(days).sort().map(function (k) { return { day: k, amt: days[k].amt, n: Object.keys(days[k].notes).length }; });
+    R.buys = mv.filter(function (m) { return m.type === 'compra'; });
+    R.buyTotal = R.buys.reduce(function (a, m) { return a + (+m.total || 0); }, 0);
+    R.opens = mv.filter(function (m) { return m.type === 'abrir'; });
+    // inventario de cada producto: cómo está hoy y lo que entró / salió en el periodo
+    var flow = {}; mv.forEach(function (m) { if (m.type === 'abrir') return; var f = flow[m.item] = flow[m.item] || { inn: 0, out: 0 }; if (m.delta > 0) f.inn += m.delta; else f.out += -m.delta; });
+    R.inv = vItems().filter(function (i) { return sel === 'all' || i.store === sel; }).sort(function (a, b) { return catOf(a).localeCompare(catOf(b)) || byName(a, b); }).map(function (i) {
+      var st = isBulk(i) ? bulkState(i) : null, f = flow[i.id] || { inn: 0, out: 0 };
+      return { name: i.name, cat: CATS[catOf(i)], closed: st ? st.closed : null, open: st ? st.open : null, total: i.qty, unit: baseUnit(i), min: i.min, st: status(i), warn: bagWarn(i), inn: f.inn, out: f.out, val: unitCost(i) > 0 ? i.qty * unitCost(i) : 0 };
+    });
+    R.invVal = R.inv.reduce(function (a, r) { return a + r.val; }, 0);
+    R.nOut = R.inv.filter(function (r) { return r.st === 'out'; }).length; R.nLow = R.inv.filter(function (r) { return r.st === 'low'; }).length;
+    return R;
+  }
+  function vrHtml(R) {
+    var dt = function (ts) { return new Date(ts).toLocaleString('es-MX', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+    var h = '<div class="stats"><div class="stat"><b style="font-size:22px">' + money(R.total) + '</b><span>Vendido</span></div><div class="stat"><b>' + R.notes.length + '</b><span>Notas de venta</span></div>' +
+      '<div class="stat"><b style="font-size:20px">' + fmt(R.bultos) + ' <small>bultos</small></b><span>' + fmt(R.granel) + ' kg a granel' + (R.piezas ? ' · ' + fmt(R.piezas) + ' piezas' : '') + '</span></div>' +
+      '<div class="stat out"><b>' + R.nOut + '</b><span>Agotados</span></div><div class="stat low"><b>' + R.nLow + '</b><span>Por agotarse</span></div></div>' +
+      '<p class="hint">' + esc(R.P.label) + ' · ' + esc(R.store) + (R.capped ? ' · se muestran los primeros 5,000 movimientos' : '') + '</p>';
+    if (R.P.kind !== 'dia' && R.days.length) h += '<h2 style="font-size:15px">Ventas por día</h2><div class="tablewrap"><table><thead><tr><th>Día</th><th>Notas</th><th>Vendido</th></tr></thead><tbody>' + R.days.map(function (d) { return '<tr><td>' + esc(parseYmd(d.day).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' })) + '</td><td>' + d.n + '</td><td>' + money(d.amt) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+    h += '<h2 style="font-size:15px">Lo que se vendió por producto</h2>' + (R.prods.length ? '<div class="tablewrap"><table><thead><tr><th>Producto</th><th>Bultos</th><th>Kg a granel</th><th>Piezas</th><th>Importe</th></tr></thead><tbody>' + R.prods.map(function (p) { return '<tr><td>' + esc(p.name) + '</td><td>' + (p.bultos ? fmt(p.bultos) : '—') + '</td><td>' + (p.granel ? fmt(p.granel) : '—') + '</td><td>' + (p.piezas ? fmt(p.piezas) : '—') + '</td><td>' + money(p.amt) + '</td></tr>'; }).join('') + '</tbody><tfoot><tr><td>Total</td><td>' + fmt(R.bultos) + '</td><td>' + fmt(R.granel) + '</td><td>' + fmt(R.piezas) + '</td><td>' + money(R.total) + '</td></tr></tfoot></table></div>' : '<p class="hint">No hubo ventas en este periodo.</p>');
+    if (R.notes.length) h += '<h2 style="font-size:15px">Notas de venta</h2><div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Nota</th><th>Cliente</th><th>Productos</th><th>Total</th><th>Usuario</th></tr></thead><tbody>' + R.notes.slice(0, 200).map(function (n) { return '<tr><td>' + dt(n.ts) + '</td><td>' + esc(n.folio) + '</td><td>' + esc(n.client || '—') + '</td><td>' + esc(n.lines.join(', ')) + '</td><td>' + money(n.total) + '</td><td>' + esc(n.by) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+    if (R.opens.length) h += '<h2 style="font-size:15px">Bultos abiertos</h2><div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Motivo</th><th>Quedaron</th><th>Usuario</th></tr></thead><tbody>' + R.opens.map(function (m) { return '<tr><td>' + dt(m.ts) + '</td><td>' + esc(m.name) + '</td><td>' + esc(m.ref || '') + '</td><td>' + (m.closedAfter != null ? fmt(m.closedAfter) + ' cerrados + ' + fmt(m.openAfter || 0) + ' kg' : '—') + '</td><td>' + esc(m.by || '') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+    if (R.buys.length) h += '<h2 style="font-size:15px">Compras</h2><div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Cantidad</th><th>Total</th><th>Proveedor</th></tr></thead><tbody>' + R.buys.map(function (m) { return '<tr><td>' + dt(m.ts) + '</td><td>' + esc(m.name) + '</td><td>' + unitsText(m) + '</td><td>' + (m.total ? money(m.total) : '—') + '</td><td>' + esc(m.sup || '—') + '</td></tr>'; }).join('') + '</tbody><tfoot><tr><td colspan="3">Total de compras</td><td>' + money(R.buyTotal) + '</td><td></td></tr></tfoot></table></div>';
+    h += '<h2 style="font-size:15px">Cómo va el inventario de cada producto</h2>' + (R.inv.length ? '<div class="tablewrap"><table><thead><tr><th>Producto</th><th>Categoría</th><th>Cerrados</th><th>Abierto</th><th>Total</th><th>Entró</th><th>Salió</th><th>Estado</th><th>Valor</th></tr></thead><tbody>' + R.inv.map(function (r) {
+      return '<tr><td>' + esc(r.name) + '</td><td>' + esc(r.cat) + '</td><td>' + (r.closed == null ? '—' : fmt(r.closed)) + '</td><td>' + (r.open == null ? '—' : fmt(r.open) + ' kg') + '</td><td>' + fmt(r.total) + ' ' + esc(r.unit) + '</td><td class="pos">' + (r.inn ? '+' + fmt(r.inn) : '—') + '</td><td class="neg">' + (r.out ? '−' + fmt(r.out) : '—') + '</td><td>' + LABEL[r.st] + (r.warn ? ' · ' + esc(r.warn) : '') + '</td><td>' + (r.val ? money(r.val) : '—') + '</td></tr>';
+    }).join('') + '</tbody><tfoot><tr><td colspan="8">Valor del inventario</td><td>' + money(R.invVal) + '</td></tr></tfoot></table></div>' : '<p class="hint">Todavía no hay productos.</p>');
+    return h;
+  }
+  // PDF hecho en la propia página (sin librerías): portada con resumen y tablas por sección
+  function paintVr(R) {
+    var W = 1240, H = 1754, M = 64, CW = W - 2 * M, pages = [], g, y;
+    var FONT = '"IBM Plex Sans", Arial, Helvetica, sans-serif', INK = '#142033', MUTED = '#5B6878', LINE = '#DDE3EA', COL = { out: '#B3261E', low: '#B26A00', ok: '#1E7B3A' };
+    function newPage() { var cv = document.createElement('canvas'); cv.width = W; cv.height = H; g = cv.getContext('2d'); g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, W, H); g.textBaseline = 'middle'; pages.push(cv); y = M; }
+    function font(sz, w) { g.font = (w || 400) + ' ' + sz + 'px ' + FONT; }
+    function fit(t, w) { t = String(t == null ? '' : t); if (g.measureText(t).width <= w) return t; while (t.length > 1 && g.measureText(t + '…').width > w) t = t.slice(0, -1); return t + '…'; }
+    function room(h) { if (y + h > H - M - 20) newPage(); }
+    function line(t, sz, w, col) { room(sz * 1.7); font(sz, w); g.fillStyle = col || INK; g.textAlign = 'left'; g.fillText(fit(t, CW), M, y + sz * 0.8); y += sz * 1.7; }
+    function table(cols, rows) {
+      var RH = 34, x0;
+      function head() { room(RH * 2); g.fillStyle = '#EEF2F7'; g.fillRect(M, y, CW, RH); font(16, 600); g.fillStyle = MUTED; x0 = M; cols.forEach(function (c) { var cw = CW * c.w; g.textAlign = c.a === 'r' ? 'right' : 'left'; g.fillText(fit(c.h, cw - 14), c.a === 'r' ? x0 + cw - 7 : x0 + 7, y + RH / 2); x0 += cw; }); y += RH; }
+      head();
+      rows.forEach(function (r, ri) {
+        if (y + RH > H - M - 20) { newPage(); head(); }
+        if (r.foot) { g.fillStyle = '#EEF2F7'; g.fillRect(M, y, CW, RH); } else if (ri % 2) { g.fillStyle = '#F8FAFC'; g.fillRect(M, y, CW, RH); }
+        g.fillStyle = LINE; g.fillRect(M, y + RH - 1, CW, 1); x0 = M;
+        cols.forEach(function (c, ci) { var v = r.cells[ci], t = v && v.t !== undefined ? v.t : v, cw = CW * c.w; g.fillStyle = v && v.c ? v.c : INK; font(17, (v && v.b) || r.foot ? 600 : 400); g.textAlign = c.a === 'r' ? 'right' : 'left'; g.fillText(fit(t, cw - 14), c.a === 'r' ? x0 + cw - 7 : x0 + 7, y + RH / 2); x0 += cw; });
+        y += RH;
+      });
+      y += 22;
+    }
+    function section(t) { room(34 * 3 + 44); line(t, 25, 700, INK); }
+    var dt = function (ts) { return new Date(ts).toLocaleString('es-MX', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+    newPage();
+    font(38, 700); g.fillStyle = INK; g.textAlign = 'left'; g.fillText('Reporte de ventas e inventario', M, y + 28); y += 58;
+    font(21, 400); g.fillStyle = MUTED; g.fillText(fit(R.P.label + ' · ' + R.store, CW), M, y + 12); y += 44;
+    var boxes = [[money(R.total), 'Vendido', INK], [String(R.notes.length), 'Notas de venta', INK], [fmt(R.bultos) + ' / ' + fmt(R.granel) + ' kg', 'Bultos / granel', INK], [String(R.nOut), 'Agotados', COL.out], [String(R.nLow), 'Por agotarse', COL.low]];
+    var bw = (CW - 14 * (boxes.length - 1)) / boxes.length;
+    boxes.forEach(function (b, i) { var bx = M + i * (bw + 14); g.fillStyle = '#F4F6F8'; g.fillRect(bx, y, bw, 92); g.fillStyle = b[2]; font(28, 700); g.textAlign = 'left'; g.fillText(fit(b[0], bw - 22), bx + 12, y + 34); font(16, 400); g.fillStyle = MUTED; g.fillText(fit(b[1], bw - 22), bx + 12, y + 70); });
+    y += 92 + 30;
+    if (R.P.kind !== 'dia' && R.days.length) { section('Ventas por día'); table([{ h: 'Día', w: 0.5 }, { h: 'Notas', w: 0.2, a: 'r' }, { h: 'Vendido', w: 0.3, a: 'r' }], R.days.map(function (d) { return { cells: [parseYmd(d.day).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'short' }), String(d.n), money(d.amt)] }; }).concat([{ foot: true, cells: ['Total', String(R.notes.length), money(R.total)] }])); }
+    section('Lo que se vendió por producto');
+    if (!R.prods.length) line('No hubo ventas en este periodo.', 19, 400, MUTED);
+    else table([{ h: 'Producto', w: 0.4 }, { h: 'Bultos', w: 0.13, a: 'r' }, { h: 'Kg granel', w: 0.15, a: 'r' }, { h: 'Piezas', w: 0.12, a: 'r' }, { h: 'Importe', w: 0.2, a: 'r' }],
+      R.prods.map(function (p) { return { cells: [p.name, p.bultos ? fmt(p.bultos) : '—', p.granel ? fmt(p.granel) : '—', p.piezas ? fmt(p.piezas) : '—', money(p.amt)] }; }).concat([{ foot: true, cells: ['Total', fmt(R.bultos), fmt(R.granel), fmt(R.piezas), money(R.total)] }]));
+    if (R.notes.length) { section('Notas de venta'); table([{ h: 'Fecha', w: 0.15 }, { h: 'Nota', w: 0.1 }, { h: 'Cliente', w: 0.15 }, { h: 'Productos', w: 0.36 }, { h: 'Total', w: 0.12, a: 'r' }, { h: 'Usuario', w: 0.12 }], R.notes.slice(0, 400).map(function (n) { return { cells: [dt(n.ts), n.folio, n.client || '—', n.lines.join(', '), money(n.total), n.by] }; })); }
+    if (R.opens.length) { section('Bultos abiertos'); table([{ h: 'Fecha', w: 0.16 }, { h: 'Producto', w: 0.26 }, { h: 'Motivo', w: 0.32 }, { h: 'Quedaron', w: 0.16 }, { h: 'Usuario', w: 0.1 }], R.opens.map(function (m) { return { cells: [dt(m.ts), m.name, m.ref || '', m.closedAfter != null ? fmt(m.closedAfter) + ' + ' + fmt(m.openAfter || 0) + ' kg' : '—', m.by || ''] }; })); }
+    if (R.buys.length) { section('Compras'); table([{ h: 'Fecha', w: 0.17 }, { h: 'Producto', w: 0.33 }, { h: 'Cantidad', w: 0.15, a: 'r' }, { h: 'Total', w: 0.15, a: 'r' }, { h: 'Proveedor', w: 0.2 }], R.buys.map(function (m) { return { cells: [dt(m.ts), m.name, unitsText(m), m.total ? money(m.total) : '—', m.sup || '—'] }; }).concat([{ foot: true, cells: ['Total', '', '', money(R.buyTotal), ''] }])); }
+    section('Cómo va el inventario de cada producto');
+    if (!R.inv.length) line('Todavía no hay productos.', 19, 400, MUTED);
+    else table([{ h: 'Producto', w: 0.24 }, { h: 'Cerrados', w: 0.09, a: 'r' }, { h: 'Abierto', w: 0.1, a: 'r' }, { h: 'Total', w: 0.12, a: 'r' }, { h: 'Entró', w: 0.09, a: 'r' }, { h: 'Salió', w: 0.09, a: 'r' }, { h: 'Estado', w: 0.15 }, { h: 'Valor', w: 0.12, a: 'r' }],
+      R.inv.map(function (r) { var c = r.st === 'ok' ? INK : COL[r.st]; return { cells: [{ t: r.name, c: c, b: r.st !== 'ok' }, r.closed == null ? '—' : fmt(r.closed), r.open == null ? '—' : fmt(r.open) + ' kg', fmt(r.total) + ' ' + r.unit, r.inn ? '+' + fmt(r.inn) : '—', r.out ? '-' + fmt(r.out) : '—', { t: LABEL[r.st] + (r.warn ? ' · aviso' : ''), c: c, b: r.st !== 'ok' }, r.val ? money(r.val) : '—'] }; })
+        .concat([{ foot: true, cells: ['Valor del inventario', '', '', '', '', '', '', money(R.invVal)] }]));
+    pages.forEach(function (p, i) { var c = p.getContext('2d'); c.textBaseline = 'middle'; c.font = '400 15px ' + FONT; c.fillStyle = MUTED; c.textAlign = 'left'; c.fillText('Sistema Forrajera · generado ' + R.date, M, H - 34); c.textAlign = 'right'; c.fillText('Página ' + (i + 1) + ' de ' + pages.length, W - M, H - 34); });
+    return pages;
+  }
+  $('#vr-pdf').addEventListener('click', function () {
+    if (!vrData) return;
+    var btn = $('#vr-pdf'); btn.disabled = true; $('#vr-msg').textContent = 'Preparando PDF…';
+    (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(function () {
+      var k = vrData.P.kind, s = ymd(vrData.P.start), name = 'reporte-' + (k === 'mes' ? 'mensual-' + s.slice(0, 7) : k === 'semana' ? 'semanal-' + s : 'diario-' + s) + '.pdf';
+      return saveFile(name, pdfBlob(paintVr(vrData)));
+    }).catch(function () { toast('No se pudo crear el PDF.'); }).then(function () { btn.disabled = false; $('#vr-msg').textContent = ''; });
+  });
+
   /* ---------- produccion, compras y recetas (todo conectado al inventario) ---------- */
   var prodDocs = [], curTab = 'inv', opsSig = {};
   var TYPES = { prod: 'Producción', cons: 'Consumo', venta: 'Venta', compra: 'Compra', abrir: 'Bulto abierto', aj: 'Ajuste' };
@@ -741,11 +933,19 @@
     bulkTx(id, function (st) { return (st.closed === closed && Math.abs(st.open - open) < 1e-9) ? [] : [{ dClosed: closed - st.closed, dOpen: r2(open - st.open), type: 'aj', ref: 'Ajuste de inventario' }]; })
       .catch(function (e) { fail(e); renderList(); });
   }
-  // pasa un bulto de «cerrados» al bulto abierto (se suma a lo que quede abierto)
+  // abre bultos a mano: pregunta cuántos y para qué; para granel pasan al bulto abierto, si se dañaron se dan de baja
   function openBag(id) {
     var item = items.find(function (x) { return x.id === id; }); if (!canEdit(item)) return;
-    bulkTx(id, function (st, bag) { return [{ dClosed: -1, dOpen: bag, type: 'abrir', ref: 'Bulto abierto a mano' }]; })
-      .then(function (r) { toast('Bulto abierto: ahora hay ' + fmt(r.open) + ' kg en el abierto y ' + fmt(r.closed) + ' cerrados.'); }).catch(fail);
+    askOpen({ item: item, need: 1, manual: true }, function (pick) {
+      if (pick.n > bulkState(item).closed) return 'Solo hay ' + bulkState(item).closed + ' bultos cerrados.';
+      var steps = pick.why === 'merma'
+        ? function () { return [{ dClosed: -pick.n, type: 'aj', ref: 'Baja: ' + pick.n + (pick.n === 1 ? ' bulto dañado o desechado' : ' bultos dañados o desechados') }]; }
+        : function (st, bag) { return [{ dClosed: -pick.n, dOpen: pick.n * bag, type: 'abrir', ref: 'Abierto para venta a granel' }]; };
+      bulkTx(id, steps).then(function (r) {
+        toast(pick.why === 'merma' ? (pick.n === 1 ? 'Se dio de baja 1 bulto' : 'Se dieron de baja ' + pick.n + ' bultos') + '. Quedan ' + fmt(r.closed) + ' cerrados.' : 'Bulto abierto: ahora hay ' + fmt(r.open) + ' kg en el abierto y ' + fmt(r.closed) + ' cerrados.');
+      }).catch(fail);
+      return null;
+    });
   }
   // cambiar los kg por bulto recalcula el total en kg con los mismos bultos cerrados y abierto
   function setBag(id, bag) {
@@ -812,6 +1012,7 @@
     syncSaleModes(); syncBuyModes();
     if (curTab === 'buy') renderBuys();
     if (curTab === 'ven') { renderCart(); renderSales(); }
+    if (curTab === 'rep') syncVrForm();
   }
 
   /* ---------- nota de venta: por bulto, a granel (kg) o por pieza ---------- */
@@ -829,18 +1030,27 @@
     $('#s-price').value = it ? (modePrice(it, sel.value) || '') : '';
     renderSaleHint();
   }
-  // Simula cómo quedaría un producto a granel tras los renglones de la nota (bulto sale de cerrados; granel del abierto, abriendo los que hagan falta)
-  function simulate(it, lines) {
-    var st = bulkState(it), c = st.closed, o = st.open, opened = 0;
-    for (var k = 0; k < lines.length; k++) {
-      var l = lines[k];
-      if (l.mode === 'bulto') { c -= l.qty; if (c < 0) return { err: 'bultos cerrados' }; }
-      else {
-        if (o + 1e-9 < l.qty) { var need = Math.ceil(r2(l.qty - o) / it.bag); if (need > c) return { err: 'kg' }; c -= need; o = r2(o + need * it.bag); opened += need; }
-        o = r2(o - l.qty);
-      }
+  // Simula la nota completa: bulto sale de cerrados, granel del bulto abierto, y «openFrom» abre bultos (del mismo producto o de otro)
+  function simulateCart(lines) {
+    var st = {}, err = null;
+    function S(id) {
+      if (!st[id]) { var it = itemById(id); st[id] = it ? Object.assign({ it: it }, isBulk(it) ? bulkState(it) : { qty: it.qty }) : null; }
+      return st[id];
     }
-    return { closed: c, open: o, opened: opened };
+    lines.forEach(function (l, k) {
+      if (err) return;
+      var s = S(l.id); if (!s) { err = { k: k, why: 'gone' }; return; }
+      if (l.openFrom) {
+        var f = S(l.openFrom.id); if (!f) { err = { k: k, why: 'gone' }; return; }
+        f.closed -= l.openFrom.n; if (f.closed < 0) { err = { k: k, why: 'closed', id: l.openFrom.id }; return; }
+        if (f === s) s.open = r2(s.open + l.openFrom.n * s.it.bag); else s.open = r2(s.open + l.openFrom.n * f.it.bag);
+      }
+      if (!isBulk(s.it)) { s.qty = r2(s.qty - l.base); if (s.qty < -1e-9) err = { k: k, why: 'qty' }; return; }
+      if (l.mode === 'bulto') { s.closed -= l.qty; if (s.closed < 0) err = { k: k, why: 'closed', id: l.id }; return; }
+      var before = s.open; s.open = r2(s.open - l.qty);
+      if (s.open < -1e-9) err = { k: k, why: 'open', id: l.id, short: r2(-s.open), openBefore: before };
+    });
+    return err ? { err: err, st: st } : { st: st };
   }
   function renderSaleHint() {
     var it = itemById($('#s-item').value), m = $('#s-mode').value, q = num($('#s-qty').value), p = num($('#s-price').value);
@@ -849,14 +1059,15 @@
     if (isBulk(it)) t += ' · bulto de ' + fmt(it.bag) + ' kg';
     if (q > 0 && p >= 0) t += ' · importe ' + money(q * p);
     if (isBulk(it) && m === 'granel' && q > 0) {
-      var prev = cart.filter(function (l) { return l.id === it.id; }), before = simulate(it, prev), after = simulate(it, prev.concat([{ mode: 'granel', qty: q }]));
-      if (!after.err && after.opened > (before.opened || 0)) { var n = after.opened - (before.opened || 0); t += ' · se abrirá' + (n === 1 ? ' 1 bulto' : 'n ' + n + ' bultos') + ' nuevo' + (n === 1 ? '' : 's'); }
+      var sim = simulateCart(cart.concat([{ id: it.id, mode: 'granel', qty: q, base: q }]));
+      if (sim.err && sim.err.k === cart.length && sim.err.why === 'open') t += ' · el bulto abierto no alcanza: al agregar te preguntaré qué bulto abriste';
     }
     $('#s-hint').textContent = t;
   }
   $('#s-item').addEventListener('change', function () { $('#s-mode').dataset.sig = ''; syncSaleModes(); });
   $('#s-mode').addEventListener('change', function () { var it = itemById($('#s-item').value); $('#s-price').value = it ? (modePrice(it, $('#s-mode').value) || '') : ''; renderSaleHint(); });
   ['#s-qty', '#s-price'].forEach(function (s) { $(s).addEventListener('input', renderSaleHint); });
+  function addLine(line) { cart.push(line); $('#s-qty').value = ''; renderCart(); renderSaleHint(); $('#s-qty').focus(); }
   $('#f-sale').addEventListener('submit', function (e) {
     e.preventDefault();
     var it = itemById($('#s-item').value), m = $('#s-mode').value, q = num($('#s-qty').value), p = num($('#s-price').value);
@@ -864,19 +1075,26 @@
     if (!isFinite(q) || q <= 0 || q > 1e6) { toast('Escribe la cantidad.'); return; }
     if (!isFinite(p) || p < 0 || p > 1e7) { toast('Escribe el precio.'); return; }
     if (m === 'bulto' && q !== Math.floor(q)) { toast('Por bulto se venden bultos completos. Para medio bulto usa «Granel (kg)».'); return; }
-    var base = m === 'bulto' ? r2(q * it.bag) : q, prev = cart.filter(function (l) { return l.id === it.id; });
-    var have = qtyText(it).replace(/&[^;]+;/g, '') + (prev.length ? ' y ya llevas parte en la nota' : '');
-    if (isBulk(it)) {
-      var sim = simulate(it, prev.concat([{ mode: m, qty: q }]));
-      if (sim.err) { toast('No alcanza: hay ' + have + '.'); return; }
-    } else if (prev.reduce(function (a, l) { return a + l.base; }, 0) + base > it.qty + 1e-9) { toast('No alcanza: hay ' + have + '.'); return; }
-    cart.push({ id: it.id, name: it.name, mode: m, qty: q, base: base, pv: r2(p), total: r2(q * p) });
-    $('#s-qty').value = ''; renderCart(); renderSaleHint(); $('#s-qty').focus();
+    var line = { id: it.id, name: it.name, mode: m, qty: q, base: m === 'bulto' ? r2(q * it.bag) : q, pv: r2(p), total: r2(q * p) };
+    var sim = simulateCart(cart.concat([line])), have = qtyText(it).replace(/&[^;]+;/g, '');
+    // a granel y el bulto abierto no alcanza: se pregunta qué bulto se abrió y se descuenta ese
+    if (sim.err && sim.err.k === cart.length && sim.err.why === 'open') {
+      askOpen({ item: it, need: Math.ceil(sim.err.short / it.bag), kg: q, open: sim.err.openBefore }, function (pick) {
+        var src = itemById(pick.id);
+        line.openFrom = { id: pick.id, n: pick.n, name: src.name };
+        var s2 = simulateCart(cart.concat([line]));
+        if (s2.err) { delete line.openFrom; return s2.err.why === 'closed' ? 'No hay tantos bultos cerrados de ' + src.name + '.' : 'Con ' + pick.n + (pick.n === 1 ? ' bulto' : ' bultos') + ' todavía no alcanzan los ' + fmt(q) + ' kg. Aumenta la cantidad de bultos.'; }
+        addLine(line); return null;
+      });
+      return;
+    }
+    if (sim.err) { toast('No alcanza: hay ' + have + (cart.some(function (l) { return l.id === it.id; }) ? ' y ya llevas parte en la nota' : '') + '.'); return; }
+    addLine(line);
   });
   function renderCart() {
     var el = $('#s-cart'), tot = cart.reduce(function (a, l) { return a + l.total; }, 0);
     el.innerHTML = cart.length ? '<div class="tablewrap"><table><thead><tr><th>Producto</th><th>Tipo</th><th>Cantidad</th><th>Precio</th><th>Importe</th><th></th></tr></thead><tbody>' + cart.map(function (l, i) {
-      return '<tr><td>' + esc(l.name) + '</td><td>' + MODES[l.mode] + '</td><td>' + fmt(l.qty) + ' ' + modeUnit(l.mode, l.qty) + '</td><td>' + money(l.pv) + '</td><td>' + money(l.total) + '</td><td><button class="ghost" type="button" data-cdel="' + i + '">Quitar</button></td></tr>';
+      return '<tr><td>' + esc(l.name) + (l.openFrom ? '<br><small class="hint">' + (l.openFrom.n === 1 ? 'Se abre 1 bulto' : 'Se abren ' + l.openFrom.n + ' bultos') + ' de ' + esc(l.openFrom.name) + '</small>' : '') + '</td><td>' + MODES[l.mode] + '</td><td>' + fmt(l.qty) + ' ' + modeUnit(l.mode, l.qty) + '</td><td>' + money(l.pv) + '</td><td>' + money(l.total) + '</td><td><button class="ghost" type="button" data-cdel="' + i + '">Quitar</button></td></tr>';
     }).join('') + '</tbody><tfoot><tr><td colspan="4">Total de la nota</td><td>' + money(tot) + '</td><td></td></tr></tfoot></table></div>' : '<p class="hint">La nota está vacía. Agrega productos arriba.</p>';
     $('#s-go').disabled = !cart.length;
     $('#s-total').textContent = cart.length ? money(tot) : '';
@@ -891,13 +1109,20 @@
     lines.forEach(function (l) {
       p = p.then(function () {
         var ref = 'Nota ' + folio + (client ? ' · ' + client : ''), mv = { pv: l.pv, total: l.total, mode: l.mode, units: l.qty, sale: folio, client: client };
-        var run = l.mode === 'bulto' ? bulkTx(l.id, [{ dClosed: -l.qty, type: 'venta', ref: ref, mv: mv }])
-          // a granel sale del bulto abierto; si no alcanza, primero se abren los bultos necesarios y queda anotado
-          : l.mode === 'granel' ? bulkTx(l.id, function (st, bag) {
-            var need = st.open + 1e-9 < l.qty ? Math.ceil(r2(l.qty - st.open) / bag) : 0;
-            return [need ? { dClosed: -need, dOpen: need * bag, type: 'abrir', ref: 'Abierto para venta a granel · Nota ' + folio } : null, { dOpen: -l.qty, type: 'venta', ref: ref, mv: mv }];
-          })
-          : applyDelta(l.id, -l.base, 'venta', ref, { mv: mv });
+        var sale = { type: 'venta', ref: ref, mv: mv }, run;
+        if (l.mode === 'bulto') run = bulkTx(l.id, [Object.assign({ dClosed: -l.qty }, sale)]);
+        else if (l.mode !== 'granel') run = applyDelta(l.id, -l.base, 'venta', ref, { mv: mv });
+        else if (!l.openFrom) run = bulkTx(l.id, [Object.assign({ dOpen: -l.qty }, sale)]);
+        else {
+          // se abre el bulto que dijo el usuario: se descuenta de sus cerrados y queda anotado «abierto para venta a granel»
+          var why = 'Abierto para venta a granel · Nota ' + folio, n = l.openFrom.n;
+          if (l.openFrom.id === l.id) run = bulkTx(l.id, function (st, bag) { return [{ dClosed: -n, dOpen: n * bag, type: 'abrir', ref: why }, Object.assign({ dOpen: -l.qty }, sale)]; });
+          else {
+            var srcBag = 0;
+            run = bulkTx(l.openFrom.id, function (st, bag) { srcBag = bag; return [{ dClosed: -n, type: 'abrir', ref: why + ' de ' + l.name }]; })
+              .then(function () { return bulkTx(l.id, [{ dOpen: n * srcBag, type: 'abrir', ref: 'Recibe ' + n + (n === 1 ? ' bulto abierto' : ' bultos abiertos') + ' de ' + l.openFrom.name + ' · Nota ' + folio }, Object.assign({ dOpen: -l.qty }, sale)]); });
+          }
+        }
         return run.then(function () { done++; tot += l.total; });
       });
     });
@@ -909,6 +1134,38 @@
       if (err && err.code === 'gone') toast('Un producto de la nota fue eliminado.'); else fail(err);
     }).then(function () { renderCart(); renderOps(); });
   });
+
+  /* ---------- ventana «¿Qué bulto abriste?» ---------- */
+  var openCb = null;
+  // o: { item, need, kg, open, manual }; cb(pick) devuelve un texto de error o null si todo bien
+  function askOpen(o, cb) {
+    var list = o.manual ? [o.item] : vItems().filter(function (x) { return isBulk(x) && x.store === o.item.store && bulkState(x).closed >= 1; }).sort(byName);
+    if (!list.length) { toast('No alcanza: ya no hay bultos cerrados que abrir en esta tienda.'); return; }
+    $('#od-title').textContent = o.manual ? 'Abrir bulto de ' + o.item.name : '¿Qué bulto abriste?';
+    $('#od-text').textContent = o.manual
+      ? 'Pasa bultos de «cerrados» al bulto abierto (o los da de baja si se dañaron). Se descuentan del inventario y queda anotado en el historial.'
+      : 'Para vender ' + fmt(o.kg) + ' kg de ' + o.item.name + ' a granel no alcanza el bulto abierto (quedan ' + fmt(o.open) + ' kg). Elige el bulto que abriste: se descontará de los bultos cerrados y quedará anotado como abierto para venta a granel.';
+    $('#od-item').innerHTML = list.map(function (x) { var st = bulkState(x); return '<option value="' + esc(x.id) + '">' + esc(x.name) + ' · ' + st.closed + (st.closed === 1 ? ' cerrado' : ' cerrados') + ' · bulto de ' + fmt(x.bag) + ' kg</option>'; }).join('');
+    if (list.some(function (x) { return x.id === o.item.id; })) $('#od-item').value = o.item.id;
+    $('#od-item').disabled = !!o.manual;
+    $('#od-n').value = Math.max(1, o.need || 1);
+    $('#od-why-l').hidden = !o.manual; $('#od-why').value = 'granel';
+    $('#od-err').textContent = '';
+    openCb = cb;
+    $('#open-dlg').showModal();
+  }
+  $('#f-open').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var go = !(e.submitter && e.submitter.value === 'cancel');
+    if (!go || !openCb) { openCb = null; $('#open-dlg').close(); return; }
+    var n = num($('#od-n').value), src = itemById($('#od-item').value);
+    if (!src) { $('#od-err').textContent = 'Elige el bulto que abriste.'; return; }
+    if (!(n >= 1) || n !== Math.floor(n)) { $('#od-err').textContent = 'Escribe cuántos bultos abriste (número entero).'; return; }
+    var msg = openCb({ id: src.id, n: n, why: $('#od-why').value });
+    if (msg) { $('#od-err').textContent = msg; return; }
+    openCb = null; $('#open-dlg').close();
+  });
+  $('#open-dlg').addEventListener('close', function () { openCb = null; });
 
   /* ---------- compras: por bulto, por kg o por pieza ---------- */
   function syncBuyModes() {
@@ -1270,6 +1527,7 @@
     if (db) { db.close(); db = null; }
     if (profSub && sb) { sb.removeChannel(profSub); profSub = null; }
     stores = []; items = []; moves = []; prodDocs = []; settings = {}; accounts = []; resetCfg = null; salesDocs = []; buyDocs = []; goals = {};
+    stockSeen = null; summaryShown = false;
     ready.stores = false; ready.items = false;
   }
   function logout(msg) {
