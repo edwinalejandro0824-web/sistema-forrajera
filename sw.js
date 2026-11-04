@@ -1,5 +1,5 @@
 /* Guarda la pantalla del sistema para que abra rápido. Los datos siempre vienen de Supabase. */
-var CACHE = 'forrajera-v3';
+var CACHE = 'forrajera-v4';
 var SHELL = ['./', 'index.html', 'app.js', 'config.js', 'db.js', 'vendor/supabase-2.45.4.min.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', function (e) {

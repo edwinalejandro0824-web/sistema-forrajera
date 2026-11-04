@@ -1540,7 +1540,7 @@
   }
   function refreshSetup() {
     if (!sb) return;
-    sb.rpc('forr_setup_needed').then(function (r) {
+    sb.rpc('sistema_forrajera_setup_needed').then(function (r) {
       if (r.error) throw r.error;
       setupMode = r.data === true; ready.accounts = true; renderLogin();
     }).catch(function () {
@@ -1550,7 +1550,7 @@
   }
   // Entra al sistema con la sesión de Supabase ya iniciada
   function enter(user) {
-    return sb.from('forr_profiles').select('id,username,name,role,store').eq('id', user.id).maybeSingle().then(function (r) {
+    return sb.from('sistema_forrajera_perfiles').select('id,username,name,role,store').eq('id', user.id).maybeSingle().then(function (r) {
       if (r.error) throw r.error;
       if (!r.data) throw { code: 'noprofile' };
       stopData(); me = toAcc(r.data); accounts = [me];
@@ -1609,7 +1609,7 @@
   $('#m-back').addEventListener('click', function () { logout(); });
   function loadAccounts() {
     if (!me) return;
-    var q = sb.from('forr_profiles').select('id,username,name,role,store');
+    var q = sb.from('sistema_forrajera_perfiles').select('id,username,name,role,store');
     if (!isAdmin()) q = q.eq('id', me.id);
     q.then(function (r) {
       if (r.error || !me) return;
@@ -1622,7 +1622,7 @@
     });
   }
   function watchProfiles() {
-    profSub = sb.channel('forr-profiles-changes').on('postgres_changes', { event: '*', schema: 'public', table: 'forr_profiles' }, function () { loadAccounts(); }).subscribe();
+    profSub = sb.channel('forr-profiles-changes').on('postgres_changes', { event: '*', schema: 'public', table: 'sistema_forrajera_perfiles' }, function () { loadAccounts(); }).subscribe();
   }
   function renderLogin() {
     if (me) return;
@@ -1655,7 +1655,7 @@
       if (!/^[a-z0-9._-]{3,30}$/.test(user)) { err.textContent = 'El usuario debe tener de 3 a 30 letras minúsculas, números, punto o guion.'; return; }
       if (pass.length < 8) { err.textContent = 'La contraseña debe tener al menos 8 caracteres.'; return; }
       if (pass !== $('#l-pass2').value) { err.textContent = 'Las contraseñas no coinciden.'; return; }
-      p = sb.rpc('forr_create_account', { p_username: user, p_password: pass, p_name: name, p_role: 'admin', p_store: '' }).then(function (r) { if (r.error) throw { code: 'setup', e: r.error }; });
+      p = sb.rpc('sistema_forrajera_create_account', { p_username: user, p_password: pass, p_name: name, p_role: 'admin', p_store: '' }).then(function (r) { if (r.error) throw { code: 'setup', e: r.error }; });
     } else if (!/^[a-z0-9._-]{3,30}$/.test(user)) { err.textContent = 'Usuario o contraseña incorrectos.'; return; }
     $('#l-go').disabled = true;
     var wait = 0;
@@ -1682,7 +1682,7 @@
     if (accounts.some(function (a) { return a.user === user; })) { toast('Ese usuario ya existe.'); return; }
     if (pass.length < 8) { toast('La contraseña debe tener al menos 8 caracteres.'); return; }
     if (role === 'staff' && !store) { toast('Elige la tienda del encargado. Primero agrega la tienda si no existe.'); return; }
-    sb.rpc('forr_create_account', { p_username: user, p_password: pass, p_name: name, p_role: role, p_store: role === 'staff' ? store : '' }).then(function (r) {
+    sb.rpc('sistema_forrajera_create_account', { p_username: user, p_password: pass, p_name: name, p_role: role, p_store: role === 'staff' ? store : '' }).then(function (r) {
       if (r.error) { toast(/taken/.test(rpcMsg(r.error)) ? 'Ese usuario ya existe.' : 'No se pudo crear el usuario.'); return; }
       $('#u-name').value = ''; $('#u-user').value = ''; $('#u-pass').value = ''; toast('Usuario creado'); loadAccounts();
     }, function () { toast('No se pudo crear el usuario. Revisa tu conexión.'); });
@@ -1694,7 +1694,7 @@
       var mid = t.dataset.resetmfa;
       if (sureId !== 'm:' + mid) { armSure('m:' + mid); renderUsers(); return; }
       sureId = null;
-      sb.rpc('forr_reset_mfa', { p_user: mid }).then(function (r) {
+      sb.rpc('sistema_forrajera_reset_mfa', { p_user: mid }).then(function (r) {
         if (r.error) { toast('No se pudo reiniciar el autenticador.'); renderUsers(); return; }
         if (mid === me.id) { logout('Reiniciaste tu autenticador. Entra de nuevo y escanea el código nuevo.'); return; }
         toast('Autenticador reiniciado. Al entrar tendrá que escanear un código nuevo.'); renderUsers();
@@ -1705,7 +1705,7 @@
       var id = t.dataset.resetuser, inp = document.getElementById('pw-' + id);
       if (!inp) return;
       if (inp.value.length < 8) { toast('La contraseña debe tener al menos 8 caracteres.'); return; }
-      sb.rpc('forr_set_password', { p_user: id, p_password: inp.value }).then(function (r) {
+      sb.rpc('sistema_forrajera_set_password', { p_user: id, p_password: inp.value }).then(function (r) {
         if (r.error) { toast('No se pudo cambiar la contraseña.'); return; }
         inp.value = ''; toast('Contraseña cambiada');
       });
@@ -1715,7 +1715,7 @@
       if (sureId === 'u:' + uid) {
         sureId = null;
         if (acc && acc.role === 'admin' && accounts.filter(function (a) { return a.role === 'admin'; }).length <= 1) { toast('Debe quedar al menos un administrador.'); renderUsers(); return; }
-        sb.rpc('forr_delete_account', { p_user: uid }).then(function (r) {
+        sb.rpc('sistema_forrajera_delete_account', { p_user: uid }).then(function (r) {
           if (r.error) { toast(/last_admin/.test(rpcMsg(r.error)) ? 'Debe quedar al menos un administrador.' : 'No se pudo eliminar el usuario.'); return; }
           toast('Usuario eliminado'); loadAccounts();
         });
@@ -1726,7 +1726,7 @@
     e.preventDefault(); if (!me || !sb) return;
     var cur = $('#pw-cur').value, nw = $('#pw-new').value;
     if (nw.length < 8) { toast('La contraseña nueva debe tener al menos 8 caracteres.'); return; }
-    sb.rpc('forr_change_my_password', { p_old: cur, p_new: nw }).then(function (r) {
+    sb.rpc('sistema_forrajera_change_my_password', { p_old: cur, p_new: nw }).then(function (r) {
       if (r.error) { toast(/bad_password/.test(rpcMsg(r.error)) ? 'La contraseña actual no es correcta.' : 'No se pudo cambiar la contraseña.'); return; }
       $('#pw-cur').value = ''; $('#pw-new').value = ''; toast('Contraseña cambiada');
     });

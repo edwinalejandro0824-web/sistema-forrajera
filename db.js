@@ -1,4 +1,4 @@
-/* Capa de datos: misma forma que usaba el sistema (collection / doc / onSnapshot), guardada en la tabla "forr_docs" de Supabase (separada de CifraStock). */
+/* Capa de datos: misma forma que usaba el sistema (collection / doc / onSnapshot), guardada en la tabla "sistema_forrajera_docs" de Supabase (separada de CifraStock). */
 (function () {
   var CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   function rid() { var a = new Uint8Array(20), o = ''; crypto.getRandomValues(a); for (var i = 0; i < a.length; i++) o += CHARS[a[i] % 62]; return o; }
@@ -17,7 +17,7 @@
     function emit(coll) { (listeners[coll] || []).slice().forEach(function (fn) { fn(); }); }
     function ensureChannel() {
       if (channel) return;
-      channel = sb.channel('forr-docs-changes').on('postgres_changes', { event: '*', schema: 'public', table: 'forr_docs' }, function (p) {
+      channel = sb.channel('forr-docs-changes').on('postgres_changes', { event: '*', schema: 'public', table: 'sistema_forrajera_docs' }, function (p) {
         var c = (p.new && p.new.coll) || (p.old && p.old.coll);
         if (c) emit(c); else Object.keys(listeners).forEach(emit);
       }).subscribe();
@@ -46,7 +46,7 @@
     Query.prototype.orderBy = function (f, dir) { var o = clone(this.o); o.ord = [f, dir === 'desc']; return new Query(this.coll, o); };
     Query.prototype.limit = function (n) { var o = clone(this.o); o.lim = n; return new Query(this.coll, o); };
     Query.prototype.get = function () {
-      var q = sb.from('forr_docs').select('id,data').eq('coll', this.coll);
+      var q = sb.from('sistema_forrajera_docs').select('id,data').eq('coll', this.coll);
       this.o.w.forEach(function (w) { q = q[OPS[w[1]]](col(w[0]), w[2]); });
       if (this.o.ord) q = q.order(col(this.o.ord[0]), { ascending: !this.o.ord[1] });
       if (this.o.lim) q = q.limit(this.o.lim);
@@ -61,22 +61,22 @@
     function Doc(coll, id) { this.coll = coll; this.id = id; }
     Doc.prototype.get = function () {
       var id = this.id;
-      return sb.from('forr_docs').select('data').eq('coll', this.coll).eq('id', id).maybeSingle().then(function (r) {
+      return sb.from('sistema_forrajera_docs').select('data').eq('coll', this.coll).eq('id', id).maybeSingle().then(function (r) {
         if (r.error) throw err(r.error);
         return snapDoc(id, r.data ? r.data.data : null);
       });
     };
     Doc.prototype.set = function (data) {
       var c = this.coll;
-      return sb.from('forr_docs').upsert({ coll: c, id: this.id, data: data }).then(function (r) { if (r.error) throw err(r.error); emit(c); });
+      return sb.from('sistema_forrajera_docs').upsert({ coll: c, id: this.id, data: data }).then(function (r) { if (r.error) throw err(r.error); emit(c); });
     };
     Doc.prototype.update = function (patch) {
       var c = this.coll;
-      return sb.rpc('forr_doc_patch', { p_coll: c, p_id: this.id, p_patch: patch }).then(function (r) { if (r.error) throw err(r.error); emit(c); });
+      return sb.rpc('sistema_forrajera_doc_patch', { p_coll: c, p_id: this.id, p_patch: patch }).then(function (r) { if (r.error) throw err(r.error); emit(c); });
     };
     Doc.prototype.delete = function () {
       var c = this.coll;
-      return sb.from('forr_docs').delete().eq('coll', c).eq('id', this.id).then(function (r) { if (r.error) throw err(r.error); emit(c); });
+      return sb.from('sistema_forrajera_docs').delete().eq('coll', c).eq('id', this.id).then(function (r) { if (r.error) throw err(r.error); emit(c); });
     };
     Doc.prototype.onSnapshot = function (cb, onErr) { var self = this; return watch(this.coll, function () { return self.get(); }, cb, onErr); };
 

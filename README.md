@@ -17,7 +17,7 @@ Es una app web instalable (PWA): funciona en el navegador y se instala en celula
 ## Cómo está hecho
 
 - `index.html`, `app.js`: la app (HTML y JavaScript, sin compilación).
-- `db.js`: capa de datos sobre la tabla `forr_docs` de Supabase, con cambios en tiempo real.
+- `db.js`: capa de datos sobre la tabla `sistema_forrajera_docs` de Supabase, con cambios en tiempo real.
 - `config.js`: dirección del proyecto de Supabase y su llave **publicable**. Esa llave está hecha para ir en el navegador; los permisos los controla la base de datos con Row Level Security.
 - `sw.js`, `manifest.webmanifest`, íconos: lo que la hace instalable.
 - `_headers`: cabeceras de seguridad para Netlify (CSP, HSTS, etc.).
@@ -26,8 +26,11 @@ Es una app web instalable (PWA): funciona en el navegador y se instala en celula
 
 ## Base de datos (Supabase)
 
-- `forr_docs` y `forr_profiles` guardan los datos y usuarios de la app, con reglas por rol (administrador o encargado de su tienda) y exigiendo sesión verificada con el autenticador (`aal2`).
-- Las tablas y vistas `forrajera_*` (inventario, ventas, compras, entradas y salidas, bultos abiertos, metas…) se llenan solas con triggers y sirven para consultar todo en español desde el panel de Supabase. No son accesibles desde la API.
+Vive en el proyecto `despachox-v1`, junto con Control de Despachos. Todo lo de la forrajera lleva el prefijo `sistema_forrajera_` (tablas, vistas, funciones y el esquema `sistema_forrajera_reportes`) para no mezclarse.
+
+
+- `sistema_forrajera_docs` y `sistema_forrajera_perfiles` guardan los datos y usuarios de la app, con reglas por rol (administrador o encargado de su tienda) y exigiendo sesión verificada con el autenticador (`aal2`).
+- Las tablas y vistas `sistema_forrajera_*` (inventario, ventas, compras, entradas y salidas, bultos abiertos, metas…) se llenan solas con triggers y sirven para consultar todo en español desde el panel de Supabase. No son accesibles desde la API.
 
 Para montarla en un proyecto nuevo: ejecuta los archivos de `supabase/` en orden en el SQL Editor de Supabase y pon la URL y la llave publicable del proyecto en `config.js`.
 
