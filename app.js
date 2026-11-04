@@ -1054,10 +1054,10 @@
   }
   function renderSaleHint() {
     var it = itemById($('#s-item').value), m = $('#s-mode').value, q = num($('#s-qty').value), p = num($('#s-price').value);
+    $('#s-line').value = it && q > 0 && p >= 0 ? money(r2(q * p)) : '';
     if (!it) { $('#s-hint').textContent = 'Primero agrega productos en Administración.'; return; }
     var t = 'Hay ' + qtyText(it).replace(/&[^;]+;/g, '');
     if (isBulk(it)) t += ' · bulto de ' + fmt(it.bag) + ' kg';
-    if (q > 0 && p >= 0) t += ' · importe ' + money(q * p);
     if (isBulk(it) && m === 'granel' && q > 0) {
       var sim = simulateCart(cart.concat([{ id: it.id, mode: 'granel', qty: q, base: q }]));
       if (sim.err && sim.err.k === cart.length && sim.err.why === 'open') t += ' · el bulto abierto no alcanza: al agregar te preguntaré qué bulto abriste';
@@ -1094,11 +1094,23 @@
   function renderCart() {
     var el = $('#s-cart'), tot = cart.reduce(function (a, l) { return a + l.total; }, 0);
     el.innerHTML = cart.length ? '<div class="tablewrap"><table><thead><tr><th>Producto</th><th>Tipo</th><th>Cantidad</th><th>Precio</th><th>Importe</th><th></th></tr></thead><tbody>' + cart.map(function (l, i) {
-      return '<tr><td>' + esc(l.name) + (l.openFrom ? '<br><small class="hint">' + (l.openFrom.n === 1 ? 'Se abre 1 bulto' : 'Se abren ' + l.openFrom.n + ' bultos') + ' de ' + esc(l.openFrom.name) + '</small>' : '') + '</td><td>' + MODES[l.mode] + '</td><td>' + fmt(l.qty) + ' ' + modeUnit(l.mode, l.qty) + '</td><td>' + money(l.pv) + '</td><td>' + money(l.total) + '</td><td><button class="ghost" type="button" data-cdel="' + i + '">Quitar</button></td></tr>';
+      return '<tr><td>' + esc(l.name) + (l.openFrom ? '<br><small class="hint">' + (l.openFrom.n === 1 ? 'Se abre 1 bulto' : 'Se abren ' + l.openFrom.n + ' bultos') + ' de ' + esc(l.openFrom.name) + '</small>' : '') + '</td><td>' + MODES[l.mode] + '</td><td>' + (l.openFrom ? fmt(l.qty) : '<input type="number" min="0" step="any" inputmode="decimal" data-cq="' + i + '" value="' + l.qty + '" style="width:80px" aria-label="Cantidad de ' + esc(l.name) + '">') + ' ' + modeUnit(l.mode, l.qty) + '</td><td>' + money(l.pv) + '</td><td>' + money(l.total) + '</td><td><button class="ghost" type="button" data-cdel="' + i + '">Quitar</button></td></tr>';
     }).join('') + '</tbody><tfoot><tr><td colspan="4">Total de la nota</td><td>' + money(tot) + '</td><td></td></tr></tfoot></table></div>' : '<p class="hint">La nota está vacía. Agrega productos arriba.</p>';
     $('#s-go').disabled = !cart.length;
-    $('#s-total').textContent = cart.length ? money(tot) : '';
+    $('#s-total').textContent = cart.length ? 'Total: ' + money(tot) : '';
   }
+  // cambiar la cantidad de un renglón recalcula su importe y el total de la nota
+  $('#s-cart').addEventListener('change', function (e) {
+    var i = e.target.dataset && e.target.dataset.cq; if (i == null) return;
+    var l = cart[+i], q = num(e.target.value); if (!l) return;
+    if (!isFinite(q) || q <= 0 || q > 1e6) { toast('Escribe una cantidad válida.'); renderCart(); return; }
+    if (l.mode === 'bulto' && q !== Math.floor(q)) { toast('Por bulto se venden bultos completos.'); renderCart(); return; }
+    var it = itemById(l.id), nl = Object.assign({}, l, { qty: q, base: l.mode === 'bulto' ? r2(q * (it ? it.bag : 0)) : q, total: r2(q * l.pv) });
+    var test = cart.slice(); test[+i] = nl;
+    var sim = simulateCart(test);
+    if (sim.err) { toast('No alcanza para esa cantidad' + (it ? ': hay ' + qtyText(it).replace(/&[^;]+;/g, '') : '') + '.'); renderCart(); return; }
+    cart[+i] = nl; renderCart(); renderSaleHint();
+  });
   $('#s-cart').addEventListener('click', function (e) { var i = e.target.dataset && e.target.dataset.cdel; if (i == null) return; cart.splice(+i, 1); renderCart(); });
   $('#s-clear').addEventListener('click', function () { cart = []; renderCart(); });
   $('#s-go').addEventListener('click', function () {

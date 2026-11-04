@@ -284,6 +284,7 @@ label.f { display: flex; flex-direction: column; gap: 4px; font-size: 13px; colo
         <label class="f">Se vende por<select id="s-mode"></select></label>
         <label class="f">Cantidad<input type="number" id="s-qty" min="0" step="any" inputmode="decimal" placeholder="Bultos, kg o piezas"></label>
         <label class="f">Precio por unidad<input type="number" id="s-price" min="0" step="any" inputmode="decimal"></label>
+        <label class="f">Importe<input type="text" id="s-line" readonly tabindex="-1" placeholder="$0.00" style="font-weight:600"></label>
         <div style="align-self:end"><button class="btn" type="submit">Agregar a la nota</button></div>
       </form>
       <p class="hint" id="s-hint"></p>
